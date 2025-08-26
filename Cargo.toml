@@ -1,0 +1,12 @@
+[package]
+name = "vulcany"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+ash = { version = "*", features = ["linked"] }
+raw-window-handle = "*"
+anyhow = "*"
+log = "*"
+env_logger = { version = "*", optional = true }
+smallvec = "*"
