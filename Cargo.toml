@@ -10,3 +10,6 @@ anyhow = "*"
 log = "*"
 env_logger = { version = "*", optional = true }
 smallvec = "*"
+
+[dev-dependencies]
+winit = "*"
