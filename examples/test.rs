@@ -19,7 +19,7 @@ fn main() {
     let context = Context::new(
         &InstanceDescription {
             api_version: ApiVersion::VK_API_1_0,
-            enable_validation_layers: false,
+            enable_validation_layers: true,
             window: window.clone(),
         },
         &DeviceDescription {},

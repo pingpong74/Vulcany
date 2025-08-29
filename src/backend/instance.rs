@@ -4,7 +4,7 @@ use crate::core::context::{DeviceDescription, InstanceDescription};
 
 use ash;
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
-use std::{ffi::CStr, os::unix::raw, sync::Arc};
+use std::{ffi::CStr, sync::Arc};
 
 pub(crate) struct Surface {
     handle: ash::vk::SurfaceKHR,
@@ -33,6 +33,7 @@ pub(crate) struct PhysicalDevice {
 pub(crate) struct Instance {
     entry: ash::Entry,
     handle: ash::Instance,
+    debug_messenger: Option<ash::vk::DebugUtilsMessengerEXT>,
     surface: Surface,
     physical_device_extensions: Vec<&'static CStr>,
 }
@@ -85,9 +86,26 @@ impl Instance {
             ..Default::default()
         };
 
-        let create_info = ash::vk::InstanceCreateInfo::default()
+        let mut create_info = ash::vk::InstanceCreateInfo::default()
             .application_info(&app_info)
             .enabled_extension_names(&required_extensions);
+
+        let mut debug_create_info = ash::vk::DebugUtilsMessengerCreateInfoEXT::default()
+            .message_severity(
+                ash::vk::DebugUtilsMessageSeverityFlagsEXT::ERROR
+                    | ash::vk::DebugUtilsMessageSeverityFlagsEXT::WARNING
+                    | ash::vk::DebugUtilsMessageSeverityFlagsEXT::INFO,
+            )
+            .message_type(
+                ash::vk::DebugUtilsMessageTypeFlagsEXT::GENERAL
+                    | ash::vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE
+                    | ash::vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION,
+            )
+            .pfn_user_callback(Some(Instance::vulkan_debug_callback));
+
+        if instance_create_info.enable_validation_layers {
+            create_info = create_info.push_next(&mut debug_create_info);
+        }
 
         let instance = unsafe {
             entry
@@ -95,12 +113,26 @@ impl Instance {
                 .expect("Failed to create instance")
         };
 
+        let mut debug_messenger: Option<ash::vk::DebugUtilsMessengerEXT> = None;
+
+        if instance_create_info.enable_validation_layers {
+            let debug_utils_loader = ash::ext::debug_utils::Instance::new(&entry, &instance);
+
+            debug_messenger = Some(
+                unsafe {
+                    debug_utils_loader.create_debug_utils_messenger(&debug_create_info, None)
+                }
+                .expect("Debug Utils Messenger creation failed"),
+            );
+        }
+
         let surface =
             unsafe { Instance::create_surface(&entry, &instance, &instance_create_info.window) };
 
         return Instance {
             entry: entry,
             handle: instance,
+            debug_messenger: debug_messenger,
             surface: surface,
             physical_device_extensions: vec![ash::khr::swapchain::NAME],
         };
@@ -118,7 +150,9 @@ impl Instance {
     }
 }
 
-//Private functions
+//////Private functions//////
+
+//Surface creation
 impl Instance {
     unsafe fn create_surface<W: HasDisplayHandle + HasWindowHandle>(
         entry: &ash::Entry,
@@ -195,7 +229,10 @@ impl Instance {
             loader: ash::khr::surface::Instance::new(entry, instance),
         };
     }
+}
 
+//Physical device selection
+impl Instance {
     fn get_queue_families(
         &self,
         physical_device: ash::vk::PhysicalDevice,
@@ -369,6 +406,20 @@ impl Instance {
         }
 
         return best_device.map(|(_, dev)| dev);
+    }
+}
+
+//Debug Messenger
+impl Instance {
+    unsafe extern "system" fn vulkan_debug_callback(
+        severity: ash::vk::DebugUtilsMessageSeverityFlagsEXT,
+        types: ash::vk::DebugUtilsMessageTypeFlagsEXT,
+        data: *const ash::vk::DebugUtilsMessengerCallbackDataEXT,
+        _user: *mut std::ffi::c_void,
+    ) -> ash::vk::Bool32 {
+        let message = std::ffi::CStr::from_ptr((*data).p_message);
+        println!("[VULKAN]: {:?}", message);
+        ash::vk::FALSE
     }
 }
 
