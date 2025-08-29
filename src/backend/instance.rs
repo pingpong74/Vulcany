@@ -4,7 +4,7 @@ use crate::core::context::{DeviceDescription, InstanceDescription};
 
 use ash;
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
-use std::sync::Arc;
+use std::{ffi::CStr, os::unix::raw, sync::Arc};
 
 pub(crate) struct Surface {
     handle: ash::vk::SurfaceKHR,
@@ -34,6 +34,7 @@ pub(crate) struct Instance {
     entry: ash::Entry,
     handle: ash::Instance,
     surface: Surface,
+    physical_device_extensions: Vec<&'static CStr>,
 }
 
 impl Instance {
@@ -42,15 +43,51 @@ impl Instance {
     ) -> Instance {
         let entry = ash::Entry::linked();
 
+        let mut required_extensions = vec![ash::khr::surface::NAME.as_ptr()];
+
+        let raw_window_handle = instance_create_info
+            .window
+            .window_handle()
+            .expect("Failed to accuqire raw window handle")
+            .as_raw();
+
+        match raw_window_handle {
+            //Windows
+            raw_window_handle::RawWindowHandle::Win32(h) => {
+                required_extensions.push(ash::khr::win32_surface::NAME.as_ptr());
+            }
+
+            //Wayland
+            raw_window_handle::RawWindowHandle::Wayland(w) => {
+                required_extensions.push(ash::khr::wayland_surface::NAME.as_ptr());
+            }
+
+            //Xcb
+            raw_window_handle::RawWindowHandle::Xcb(w) => {
+                required_extensions.push(ash::khr::xcb_surface::NAME.as_ptr());
+            }
+
+            //Apple
+            raw_window_handle::RawWindowHandle::AppKit(w) => {
+                required_extensions.push(ash::ext::metal_surface::NAME.as_ptr());
+            }
+
+            //Panic if none found :(
+            _ => {}
+        };
+
+        if instance_create_info.enable_validation_layers {
+            required_extensions.push(ash::ext::debug_utils::NAME.as_ptr());
+        }
+
         let app_info = ash::vk::ApplicationInfo {
             api_version: instance_create_info.api_version.clone() as u32,
             ..Default::default()
         };
 
-        let create_info = ash::vk::InstanceCreateInfo {
-            p_application_info: &app_info,
-            ..Default::default()
-        };
+        let create_info = ash::vk::InstanceCreateInfo::default()
+            .application_info(&app_info)
+            .enabled_extension_names(&required_extensions);
 
         let instance = unsafe {
             entry
@@ -65,10 +102,20 @@ impl Instance {
             entry: entry,
             handle: instance,
             surface: surface,
+            physical_device_extensions: vec![ash::khr::swapchain::NAME],
         };
     }
 
-    pub(crate) fn create_device(&self, device_create_info: &DeviceDescription) -> Device {}
+    pub(crate) fn create_device(&self, device_create_info: &DeviceDescription) {
+        let physical_device = {
+            let dev = self.select_physical_device();
+            if dev.is_none() {
+                panic!("Failed to find vulkan compatible device")
+            }
+
+            dev
+        };
+    }
 }
 
 //Private functions
@@ -102,6 +149,7 @@ impl Instance {
                 let info = ash::vk::WaylandSurfaceCreateInfoKHR {
                     ..Default::default()
                 };
+                println!("HERE!!");
                 let loader = ash::khr::wayland_surface::Instance::new(entry, instance);
                 unsafe {
                     loader
@@ -215,7 +263,7 @@ impl Instance {
         }
     }
 
-    fn get_swpachain_support(
+    fn get_swapchain_support(
         &self,
         physical_device: ash::vk::PhysicalDevice,
     ) -> Option<SwapchainSupport> {
@@ -250,27 +298,77 @@ impl Instance {
         }
     }
 
-    fn select_physical_device(&self) -> PhysicalDevice {
-        let physical_devices = unsafe {
+    fn check_device_extension_support(&self, device: ash::vk::PhysicalDevice) -> bool {
+        let available_extensions = unsafe {
+            self.handle
+                .enumerate_device_extension_properties(device)
+                .expect("Failed to enumerate device extensions")
+        };
+
+        let available_extension_names: Vec<&std::ffi::CStr> = available_extensions
+            .iter()
+            .map(|ext| {
+                // Convert raw `extension_name` to CStr
+                let raw_name = unsafe { std::ffi::CStr::from_ptr(ext.extension_name.as_ptr()) };
+                raw_name
+            })
+            .collect();
+
+        // Check all required extensions are present
+        self.physical_device_extensions.iter().all(|&required| {
+            available_extension_names
+                .iter()
+                .any(|&avail| avail == required)
+        })
+    }
+
+    fn select_physical_device(&self) -> Option<PhysicalDevice> {
+        let devices = unsafe {
             self.handle
                 .enumerate_physical_devices()
-                .expect("Failed to find any suitable physical device")
+                .expect("Failed to enumerate physical devices")
         };
 
-        if physical_devices.is_empty() {
-            panic!("No Vulkan-compatible GPUs found!");
+        let mut best_device: Option<(i32, PhysicalDevice)> = None;
+
+        for device in devices {
+            let props = unsafe { self.handle.get_physical_device_properties(device) };
+
+            if let (Some(qf), Some(sc)) = (
+                self.get_queue_families(device),
+                self.get_swapchain_support(device),
+            ) {
+                if !self.check_device_extension_support(device) {
+                    continue;
+                }
+
+                // Score device: discrete = 1000, integrated = 100, others = 10
+                let score = match props.device_type {
+                    ash::vk::PhysicalDeviceType::DISCRETE_GPU => 1000,
+                    ash::vk::PhysicalDeviceType::INTEGRATED_GPU => 100,
+                    _ => 10,
+                };
+
+                // Prefer larger max image dimension as tiebreaker
+                let score = score + props.limits.max_image_dimension2_d as i32;
+
+                let candidate = PhysicalDevice {
+                    handle: device,
+                    swapchain_support: sc,
+                    queue_families: qf,
+                };
+
+                if let Some((best_score, _)) = &best_device {
+                    if score > *best_score {
+                        best_device = Some((score, candidate));
+                    }
+                } else {
+                    best_device = Some((score, candidate));
+                }
+            }
         }
 
-        for physical_device in physical_devices {
-            let queue_families = Instance::get_queue_families(&self, physical_device).unwrap();
-            let swapchain_capabilites =
-                Instance::get_swpachain_support(&self, physical_device).unwrap();
-        }
-
-        return PhysicalDevice {
-            handle: physical_devices[0],
-            swapchain_support: None,
-        };
+        return best_device.map(|(_, dev)| dev);
     }
 }
 
