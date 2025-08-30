@@ -2,8 +2,8 @@ use super::device::Device;
 
 use crate::core::context::{DeviceDescription, InstanceDescription};
 
-use ash;
-use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
+use ash::{self, vk::Handle};
+use raw_window_handle::{HasDisplayHandle, HasWindowHandle, RawDisplayHandle, RawWindowHandle};
 use std::{ffi::CStr, sync::Arc};
 
 pub(crate) struct Surface {
@@ -18,22 +18,24 @@ pub(crate) struct SwapchainSupport {
 }
 
 pub(crate) struct QueueFamilyIndices {
-    graphics_family: Option<u32>,
-    presetation_family: Option<u32>,
-    transfer_family: Option<u32>,
-    compute_family: Option<u32>,
+    pub graphics_family: Option<u32>,
+    pub presetation_family: Option<u32>,
+    pub transfer_family: Option<u32>,
+    pub compute_family: Option<u32>,
 }
 
 pub(crate) struct PhysicalDevice {
-    handle: ash::vk::PhysicalDevice,
-    swapchain_support: SwapchainSupport,
-    queue_families: QueueFamilyIndices,
+    pub handle: ash::vk::PhysicalDevice,
+    pub swapchain_support: SwapchainSupport,
+    pub queue_families: QueueFamilyIndices,
+    pub properties: ash::vk::PhysicalDeviceProperties,
 }
 
 pub(crate) struct Instance {
     entry: ash::Entry,
     handle: ash::Instance,
     debug_messenger: Option<ash::vk::DebugUtilsMessengerEXT>,
+    debug_loader: Option<ash::ext::debug_utils::Instance>,
     surface: Surface,
     physical_device_extensions: Vec<&'static CStr>,
 }
@@ -93,8 +95,7 @@ impl Instance {
         let mut debug_create_info = ash::vk::DebugUtilsMessengerCreateInfoEXT::default()
             .message_severity(
                 ash::vk::DebugUtilsMessageSeverityFlagsEXT::ERROR
-                    | ash::vk::DebugUtilsMessageSeverityFlagsEXT::WARNING
-                    | ash::vk::DebugUtilsMessageSeverityFlagsEXT::INFO,
+                    | ash::vk::DebugUtilsMessageSeverityFlagsEXT::WARNING,
             )
             .message_type(
                 ash::vk::DebugUtilsMessageTypeFlagsEXT::GENERAL
@@ -114,6 +115,7 @@ impl Instance {
         };
 
         let mut debug_messenger: Option<ash::vk::DebugUtilsMessengerEXT> = None;
+        let mut debug_loader: Option<ash::ext::debug_utils::Instance> = None;
 
         if instance_create_info.enable_validation_layers {
             let debug_utils_loader = ash::ext::debug_utils::Instance::new(&entry, &instance);
@@ -124,6 +126,8 @@ impl Instance {
                 }
                 .expect("Debug Utils Messenger creation failed"),
             );
+
+            debug_loader = Some(debug_utils_loader);
         }
 
         let surface =
@@ -133,19 +137,62 @@ impl Instance {
             entry: entry,
             handle: instance,
             debug_messenger: debug_messenger,
+            debug_loader: debug_loader,
             surface: surface,
             physical_device_extensions: vec![ash::khr::swapchain::NAME],
         };
     }
 
-    pub(crate) fn create_device(&self, device_create_info: &DeviceDescription) {
+    pub(crate) fn create_device(&self, device_create_info: &DeviceDescription) -> Device {
         let physical_device = {
             let dev = self.select_physical_device();
             if dev.is_none() {
                 panic!("Failed to find vulkan compatible device")
             }
 
-            dev
+            dev.unwrap()
+        };
+
+        let unique_families: Vec<u32> = {
+            let mut v = vec![
+                physical_device.queue_families.graphics_family.unwrap(),
+                physical_device.queue_families.presetation_family.unwrap(),
+            ];
+            v.sort();
+            v.dedup();
+            v
+        };
+
+        // Queue priorities (all same)
+        let priorities = [1.0_f32];
+        let queue_infos: Vec<_> = unique_families
+            .iter()
+            .map(|&family| {
+                ash::vk::DeviceQueueCreateInfo::default()
+                    .queue_family_index(family)
+                    .queue_priorities(&priorities)
+            })
+            .collect();
+
+        // Required device extensions (swapchain needed for presentation)
+        let device_extensions = vec![ash::khr::swapchain::NAME.as_ptr()];
+
+        let features = ash::vk::PhysicalDeviceFeatures::default();
+
+        let create_info = ash::vk::DeviceCreateInfo::default()
+            .queue_create_infos(&queue_infos)
+            .enabled_extension_names(&device_extensions)
+            .enabled_features(&features);
+
+        let handle = unsafe {
+            self.handle
+                .create_device(physical_device.handle, &create_info, None)
+                .expect("Failed to create logical device")
+        };
+
+        return Device {
+            handle,
+            physical_device,
         };
     }
 }
@@ -159,17 +206,15 @@ impl Instance {
         instance: &ash::Instance,
         window: &Arc<W>,
     ) -> Surface {
-        let raw_window_handle = window
-            .window_handle()
-            .expect("Failed to accuqire raw window handle")
-            .as_raw();
+        let raw_window = window.window_handle().unwrap().as_raw();
+        let raw_display = window.display_handle().unwrap().as_raw();
 
-        let surface_handle = match raw_window_handle {
-            //Windows
-            raw_window_handle::RawWindowHandle::Win32(h) => {
-                let info = ash::vk::Win32SurfaceCreateInfoKHR {
-                    ..Default::default()
-                };
+        let surface_handle = match (raw_window, raw_display) {
+            // ---------------- Windows ----------------
+            (RawWindowHandle::Win32(w), RawDisplayHandle::Windows(d)) => {
+                let info = ash::vk::Win32SurfaceCreateInfoKHR::default()
+                    .hinstance(w.hinstance.unwrap().get())
+                    .hwnd(w.hwnd.get());
                 let loader = ash::khr::win32_surface::Instance::new(entry, instance);
                 unsafe {
                     loader
@@ -178,25 +223,11 @@ impl Instance {
                 }
             }
 
-            //Wayland
-            raw_window_handle::RawWindowHandle::Wayland(w) => {
-                let info = ash::vk::WaylandSurfaceCreateInfoKHR {
-                    ..Default::default()
-                };
-                println!("HERE!!");
-                let loader = ash::khr::wayland_surface::Instance::new(entry, instance);
-                unsafe {
-                    loader
-                        .create_wayland_surface(&info, None)
-                        .expect("Failed to create surface")
-                }
-            }
-
-            //Xcb
-            raw_window_handle::RawWindowHandle::Xcb(w) => {
-                let info = ash::vk::XcbSurfaceCreateInfoKHR {
-                    ..Default::default()
-                };
+            // ---------------- XCB ----------------
+            (RawWindowHandle::Xcb(w), RawDisplayHandle::Xcb(d)) => {
+                let info = ash::vk::XcbSurfaceCreateInfoKHR::default()
+                    .connection(d.connection.unwrap().as_ptr())
+                    .window(w.window.get());
                 let loader = ash::khr::xcb_surface::Instance::new(entry, instance);
                 unsafe {
                     loader
@@ -205,11 +236,22 @@ impl Instance {
                 }
             }
 
-            //Apple
-            raw_window_handle::RawWindowHandle::AppKit(w) => {
-                let info = ash::vk::MetalSurfaceCreateInfoEXT {
-                    ..Default::default()
-                };
+            // ---------------- Wayland ----------------
+            (RawWindowHandle::Wayland(w), RawDisplayHandle::Wayland(d)) => {
+                let info = ash::vk::WaylandSurfaceCreateInfoKHR::default()
+                    .display(d.display.as_ptr())
+                    .surface(w.surface.as_ptr());
+                let loader = ash::khr::wayland_surface::Instance::new(entry, instance);
+                unsafe {
+                    loader
+                        .create_wayland_surface(&info, None)
+                        .expect("Failed to create surface")
+                }
+            }
+
+            // ---------------- macOS ----------------
+            (RawWindowHandle::AppKit(w), RawDisplayHandle::AppKit(_)) => {
+                let info = ash::vk::MetalSurfaceCreateInfoEXT::default().layer(w.ns_view.as_ptr());
                 let loader = ash::ext::metal_surface::Instance::new(entry, instance);
                 unsafe {
                     loader
@@ -218,10 +260,8 @@ impl Instance {
                 }
             }
 
-            //Panic if none found :(
-            _ => {
-                panic!("Ooo")
-            }
+            // ---------------- Unsupported ----------------
+            _ => panic!("Unsupported platform or mismatched window/display handle"),
         };
 
         return Surface {
@@ -286,7 +326,7 @@ impl Instance {
                         i as u32,
                         self.surface.handle,
                     )
-                    .unwrap()
+                    .unwrap_or(false)
             };
             if present_support && indices.presetation_family.is_none() {
                 indices.presetation_family = Some(i as u32);
@@ -371,9 +411,9 @@ impl Instance {
         for device in devices {
             let props = unsafe { self.handle.get_physical_device_properties(device) };
 
-            if let (Some(qf), Some(sc)) = (
-                self.get_queue_families(device),
+            if let (Some(sc), Some(qf)) = (
                 self.get_swapchain_support(device),
+                self.get_queue_families(device),
             ) {
                 if !self.check_device_extension_support(device) {
                     continue;
@@ -393,6 +433,7 @@ impl Instance {
                     handle: device,
                     swapchain_support: sc,
                     queue_families: qf,
+                    properties: props,
                 };
 
                 if let Some((best_score, _)) = &best_device {
@@ -430,6 +471,17 @@ impl Drop for Instance {
             self.surface
                 .loader
                 .destroy_surface(self.surface.handle, None);
+
+            if !self.debug_messenger.is_none() {
+                if self.debug_loader.is_none() {
+                    panic!("Created debug utils but not debug loader")
+                }
+
+                self.debug_loader
+                    .as_mut()
+                    .unwrap()
+                    .destroy_debug_utils_messenger(self.debug_messenger.unwrap(), None);
+            }
 
             self.handle.destroy_instance(None);
         };

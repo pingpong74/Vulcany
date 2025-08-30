@@ -25,8 +25,8 @@ pub struct DeviceDescription {}
 pub struct SwapchainDescription {}
 
 pub struct Context {
+    device: Arc<backend::device::Device>,
     instance: Arc<backend::instance::Instance>,
-    //device: Arc<backend::device::Device>,
     //swapchain: Option<Arc<backend::swapchain::Swapchain>>,
 }
 
@@ -37,11 +37,11 @@ impl Context {
         swapchain_desc: Option<SwapchainDescription>,
     ) -> Context {
         let instance = backend::instance::Instance::new(instance_desc);
-        //let device = instance.create_device(device_dec);
+        let device = instance.create_device(device_dec);
 
         return Context {
             instance: Arc::new(instance),
-            //device: Arc::new(device),
+            device: Arc::new(device),
             //swapchain: None,
         };
     }
