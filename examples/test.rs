@@ -22,7 +22,10 @@ fn main() {
             enable_validation_layers: true,
             window: window.clone(),
         },
-        &DeviceDescription {},
+        &DeviceDescription {
+            use_compute_queue: true,
+            use_transfer_queue: true,
+        },
         None,
     );
 }

@@ -20,7 +20,10 @@ pub struct InstanceDescription<W: HasDisplayHandle + HasWindowHandle> {
     pub window: Arc<W>,
 }
 
-pub struct DeviceDescription {}
+pub struct DeviceDescription {
+    pub use_compute_queue: bool,
+    pub use_transfer_queue: bool,
+}
 
 pub struct SwapchainDescription {}
 
