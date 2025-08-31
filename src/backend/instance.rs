@@ -1,14 +1,15 @@
 use super::device::Device;
 
+use crate::allocator::free_list_allocator::FreeListAllocator;
 use crate::core::context::{DeviceDescription, InstanceDescription};
 
-use ash::{self, vk::Handle};
+use ash;
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle, RawDisplayHandle, RawWindowHandle};
 use std::{ffi::CStr, sync::Arc};
 
 pub(crate) struct Surface {
-    handle: ash::vk::SurfaceKHR,
-    loader: ash::khr::surface::Instance,
+    pub(crate) handle: ash::vk::SurfaceKHR,
+    pub(crate) loader: ash::khr::surface::Instance,
 }
 
 pub(crate) struct SwapchainSupport {
@@ -33,10 +34,10 @@ pub(crate) struct PhysicalDevice {
 
 pub(crate) struct Instance {
     entry: ash::Entry,
-    handle: ash::Instance,
+    pub(crate) handle: ash::Instance,
     debug_messenger: Option<ash::vk::DebugUtilsMessengerEXT>,
     debug_loader: Option<ash::ext::debug_utils::Instance>,
-    surface: Surface,
+    pub(crate) surface: Surface,
     physical_device_extensions: Vec<&'static CStr>,
 }
 
@@ -184,15 +185,15 @@ impl Instance {
             .enabled_extension_names(&device_extensions)
             .enabled_features(&features);
 
-        let handle = unsafe {
+        let dev = unsafe {
             self.handle
                 .create_device(physical_device.handle, &create_info, None)
                 .expect("Failed to create logical device")
         };
 
         return Device {
-            handle,
-            physical_device,
+            handle: dev,
+            physical_device: physical_device,
         };
     }
 }

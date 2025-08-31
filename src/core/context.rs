@@ -25,27 +25,37 @@ pub struct DeviceDescription {
     pub use_transfer_queue: bool,
 }
 
-pub struct SwapchainDescription {}
+pub struct SwapchainDescription {
+    pub image_count: u32,
+    pub width: u32,
+    pub height: u32,
+}
+
+pub struct BufferDescription {}
 
 pub struct Context {
+    swapchain: Arc<backend::swapchain::Swapchain>,
     device: Arc<backend::device::Device>,
     instance: Arc<backend::instance::Instance>,
-    //swapchain: Option<Arc<backend::swapchain::Swapchain>>,
 }
 
 impl Context {
     pub fn new<W: HasDisplayHandle + HasWindowHandle>(
         instance_desc: &InstanceDescription<W>,
         device_dec: &DeviceDescription,
-        swapchain_desc: Option<SwapchainDescription>,
+        swapchain_desc: &SwapchainDescription,
     ) -> Context {
         let instance = backend::instance::Instance::new(instance_desc);
         let device = instance.create_device(device_dec);
+        let swapchain =
+            device.create_swapchain(swapchain_desc, &instance.handle, &instance.surface);
 
         return Context {
             instance: Arc::new(instance),
             device: Arc::new(device),
-            //swapchain: None,
+            swapchain: Arc::new(swapchain),
         };
     }
+
+    pub fn create_buffer(desc: &BufferDescription) {}
 }

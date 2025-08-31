@@ -16,9 +16,11 @@ fn main() {
             .expect("Failed to create window"),
     );
 
+    let size = window.inner_size();
+
     let context = Context::new(
         &InstanceDescription {
-            api_version: ApiVersion::VK_API_1_0,
+            api_version: ApiVersion::VK_API_1_2,
             enable_validation_layers: true,
             window: window.clone(),
         },
@@ -26,6 +28,10 @@ fn main() {
             use_compute_queue: true,
             use_transfer_queue: true,
         },
-        None,
+        &SwapchainDescription {
+            image_count: 3,
+            width: size.width,
+            height: size.height,
+        },
     );
 }
