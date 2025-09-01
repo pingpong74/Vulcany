@@ -1,5 +1,7 @@
 use super::allocation_info::{Allocation, MemoryBlock};
 
+pub(crate) struct Allocator {}
+
 pub(crate) trait GpuAllocator {
     fn allocate(
         &mut self,

@@ -1,5 +1,7 @@
+use std::sync::Arc;
+
 use crate::{
-    SwapchainDescription,
+    BufferDescription, SwapchainDescription,
     allocator::free_list_allocator::FreeListAllocator,
     backend::{instance::Surface, swapchain::Swapchain},
 };
