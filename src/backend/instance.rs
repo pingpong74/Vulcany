@@ -1,7 +1,7 @@
-use super::device::Device;
+use super::device::InnerDevice;
 
 use crate::allocator::free_list_allocator::FreeListAllocator;
-use crate::core::context::{DeviceDescription, InstanceDescription};
+use crate::core::instance::{DeviceDescription, InstanceDescription};
 
 use ash;
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle, RawDisplayHandle, RawWindowHandle};
@@ -32,7 +32,7 @@ pub(crate) struct PhysicalDevice {
     pub properties: ash::vk::PhysicalDeviceProperties,
 }
 
-pub(crate) struct Instance {
+pub(crate) struct InnerInstance {
     entry: ash::Entry,
     pub(crate) handle: ash::Instance,
     debug_messenger: Option<ash::vk::DebugUtilsMessengerEXT>,
@@ -41,10 +41,10 @@ pub(crate) struct Instance {
     physical_device_extensions: Vec<&'static CStr>,
 }
 
-impl Instance {
+impl InnerInstance {
     pub(crate) fn new<W: HasDisplayHandle + HasWindowHandle>(
         instance_create_info: &InstanceDescription<W>,
-    ) -> Instance {
+    ) -> InnerInstance {
         let entry = ash::Entry::linked();
 
         let mut required_extensions = vec![ash::khr::surface::NAME.as_ptr()];
@@ -103,7 +103,7 @@ impl Instance {
                     | ash::vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE
                     | ash::vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION,
             )
-            .pfn_user_callback(Some(Instance::vulkan_debug_callback));
+            .pfn_user_callback(Some(InnerInstance::vulkan_debug_callback));
 
         if instance_create_info.enable_validation_layers {
             create_info = create_info.push_next(&mut debug_create_info);
@@ -131,10 +131,11 @@ impl Instance {
             debug_loader = Some(debug_utils_loader);
         }
 
-        let surface =
-            unsafe { Instance::create_surface(&entry, &instance, &instance_create_info.window) };
+        let surface = unsafe {
+            InnerInstance::create_surface(&entry, &instance, &instance_create_info.window)
+        };
 
-        return Instance {
+        return InnerInstance {
             entry: entry,
             handle: instance,
             debug_messenger: debug_messenger,
@@ -144,7 +145,7 @@ impl Instance {
         };
     }
 
-    pub(crate) fn create_device(&self, device_create_info: &DeviceDescription) -> Device {
+    pub(crate) fn create_device(&self, device_create_info: &DeviceDescription) -> InnerDevice {
         let physical_device = {
             let dev = self.select_physical_device();
             if dev.is_none() {
@@ -191,7 +192,7 @@ impl Instance {
                 .expect("Failed to create logical device")
         };
 
-        return Device {
+        return InnerDevice {
             handle: dev,
             physical_device: physical_device,
         };
@@ -201,7 +202,7 @@ impl Instance {
 //////Private functions//////
 
 //Surface creation
-impl Instance {
+impl InnerInstance {
     unsafe fn create_surface<W: HasDisplayHandle + HasWindowHandle>(
         entry: &ash::Entry,
         instance: &ash::Instance,
@@ -273,7 +274,7 @@ impl Instance {
 }
 
 //Physical device selection
-impl Instance {
+impl InnerInstance {
     fn get_queue_families(
         &self,
         physical_device: ash::vk::PhysicalDevice,
@@ -452,7 +453,7 @@ impl Instance {
 }
 
 //Debug Messenger
-impl Instance {
+impl InnerInstance {
     unsafe extern "system" fn vulkan_debug_callback(
         severity: ash::vk::DebugUtilsMessageSeverityFlagsEXT,
         types: ash::vk::DebugUtilsMessageTypeFlagsEXT,
@@ -466,7 +467,7 @@ impl Instance {
 }
 
 //Drop implementation
-impl Drop for Instance {
+impl Drop for InnerInstance {
     fn drop(&mut self) {
         unsafe {
             self.surface

@@ -1,21 +1,21 @@
 use std::sync::Arc;
 
 use crate::{
-    BufferDescription, SwapchainDescription,
+    SwapchainDescription,
     allocator::free_list_allocator::FreeListAllocator,
-    backend::{instance::Surface, swapchain::Swapchain},
+    backend::{instance::Surface, swapchain::InnerSwapchain},
 };
 
 use super::instance::PhysicalDevice;
 use ash::{self, vk};
 
-pub(crate) struct Device {
+pub(crate) struct InnerDevice {
     pub(crate) handle: ash::Device,
     pub(crate) physical_device: PhysicalDevice,
 }
 
 // Swapchain Creation //
-impl Device {
+impl InnerDevice {
     fn choose_surface_format(available_formats: &[vk::SurfaceFormatKHR]) -> vk::SurfaceFormatKHR {
         available_formats
             .iter()
@@ -61,18 +61,18 @@ impl Device {
         swapchain_description: &SwapchainDescription,
         instance: &ash::Instance,
         surface: &Surface,
-    ) -> Swapchain {
+    ) -> InnerSwapchain {
         let swapchain_loader = ash::khr::swapchain::Device::new(instance, &self.handle);
 
         let support = &self.physical_device.swapchain_support;
 
-        let extent = Device::choose_extent(
+        let extent = InnerDevice::choose_extent(
             &support.capabilities,
             swapchain_description.width,
             swapchain_description.height,
         );
-        let present_mode = Device::choose_present_mode(&support.present_modes);
-        let surface_format = Device::choose_surface_format(&support.formats);
+        let present_mode = InnerDevice::choose_present_mode(&support.present_modes);
+        let surface_format = InnerDevice::choose_surface_format(&support.formats);
 
         let graphics_family = self
             .physical_device
@@ -152,17 +152,16 @@ impl Device {
             })
             .collect();
 
-        return Swapchain {
+        return InnerSwapchain {
             swapchain_loader: swapchain_loader,
             handle: swapchain,
             images: images,
             image_views: image_views,
-            device: self.handle.clone(),
         };
     }
 }
 
-impl Drop for Device {
+impl Drop for InnerDevice {
     fn drop(&mut self) {
         unsafe {
             self.handle.destroy_device(None);

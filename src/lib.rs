@@ -3,4 +3,4 @@ pub(crate) mod backend;
 
 pub mod core;
 
-pub use core::context::*;
+pub use core::{device::*, instance::*, swapchain::*};

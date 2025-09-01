@@ -18,20 +18,21 @@ fn main() {
 
     let size = window.inner_size();
 
-    let context = Context::new(
-        &InstanceDescription {
-            api_version: ApiVersion::VK_API_1_2,
-            enable_validation_layers: true,
-            window: window.clone(),
-        },
-        &DeviceDescription {
-            use_compute_queue: true,
-            use_transfer_queue: true,
-        },
-        &SwapchainDescription {
-            image_count: 3,
-            width: size.width,
-            height: size.height,
-        },
-    );
+    let instance = Instance::new(&InstanceDescription {
+        api_version: ApiVersion::VK_API_1_2,
+        enable_validation_layers: true,
+        window: window.clone(),
+    });
+
+    let device = instance.create_device(&DeviceDescription {
+        use_compute_queue: true,
+        use_transfer_queue: true,
+    });
+
+    let swapchain = device.create_swapchain(&SwapchainDescription {
+        image_count: 3,
+        width: size.width,
+        height: size.height,
+        instance: instance.clone(),
+    });
 }
