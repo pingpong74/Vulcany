@@ -1,3 +1,4 @@
+use super::instance::Instance;
 use std::sync::Arc;
 
 use crate::backend::swapchain::InnerSwapchain;

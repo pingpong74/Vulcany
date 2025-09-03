@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 ash = { version = "*", features = ["linked"] }
+vk-mem = "*"
 raw-window-handle = "*"
 anyhow = "*"
 log = "*"

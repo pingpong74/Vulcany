@@ -1,30 +1,15 @@
-use crate::backend::device::InnerDevice;
-use crate::backend::instance::InnerInstance;
+use crate::backend::{
+    device::InnerDevice,
+    instance::{InnerInstance, PhysicalDevice},
+};
 use std::sync::Arc;
 
-use super::device::Device;
+use super::{
+    definations::{DeviceDescription, InstanceDescription},
+    device::Device,
+};
 
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
-
-#[repr(u32)]
-#[derive(Clone)]
-pub enum ApiVersion {
-    VK_API_1_0 = ash::vk::API_VERSION_1_0,
-    VK_API_1_1 = ash::vk::API_VERSION_1_1,
-    VK_API_1_2 = ash::vk::API_VERSION_1_2,
-    VK_API_1_3 = ash::vk::API_VERSION_1_3,
-}
-
-pub struct InstanceDescription<W: HasDisplayHandle + HasWindowHandle> {
-    pub api_version: ApiVersion,
-    pub enable_validation_layers: bool,
-    pub window: Arc<W>,
-}
-
-pub struct DeviceDescription {
-    pub use_compute_queue: bool,
-    pub use_transfer_queue: bool,
-}
 
 #[derive(Clone)]
 pub struct Instance {
@@ -42,10 +27,15 @@ impl Instance {
     }
 
     pub fn create_device(&self, device_desc: &DeviceDescription) -> Device {
-        let inner_device = self.inner.create_device(device_desc);
+        let (device, physical_device, allocator) = self.inner.create_device_data(device_desc);
 
         return Device {
-            inner: Arc::new(inner_device),
+            inner: Arc::new(InnerDevice {
+                handle: device,
+                physical_device: physical_device,
+                allocator: allocator,
+                instance: self.inner.clone(),
+            }),
         };
     }
 }

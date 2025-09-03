@@ -1,17 +1,18 @@
-use std::sync::Arc;
-
 use crate::{
-    SwapchainDescription,
-    allocator::free_list_allocator::FreeListAllocator,
-    backend::{instance::Surface, swapchain::InnerSwapchain},
+    BufferDescription, ImageDescription, SamplerDescription, SwapchainDescription,
+    backend::instance::InnerInstance,
 };
 
 use super::instance::PhysicalDevice;
 use ash::{self, vk};
+use std::sync::Arc;
+use vk_mem::Alloc;
 
 pub(crate) struct InnerDevice {
+    pub(crate) allocator: vk_mem::Allocator,
     pub(crate) handle: ash::Device,
     pub(crate) physical_device: PhysicalDevice,
+    pub(crate) instance: Arc<InnerInstance>,
 }
 
 // Swapchain Creation //
@@ -56,13 +57,17 @@ impl InnerDevice {
         }
     }
 
-    pub(crate) fn create_swapchain(
+    pub(crate) fn create_swapchain_data(
         &self,
         swapchain_description: &SwapchainDescription,
-        instance: &ash::Instance,
-        surface: &Surface,
-    ) -> InnerSwapchain {
-        let swapchain_loader = ash::khr::swapchain::Device::new(instance, &self.handle);
+    ) -> (
+        ash::khr::swapchain::Device,
+        vk::SwapchainKHR,
+        Vec<vk::Image>,
+        Vec<vk::ImageView>,
+    ) {
+        let swapchain_loader =
+            ash::khr::swapchain::Device::new(&self.instance.handle, &self.handle);
 
         let support = &self.physical_device.swapchain_support;
 
@@ -86,7 +91,7 @@ impl InnerDevice {
             .expect("This shouldnt be possible lol");
 
         let mut create_info = vk::SwapchainCreateInfoKHR::default()
-            .surface(surface.handle)
+            .surface(self.instance.surface.handle)
             .min_image_count(swapchain_description.image_count)
             .image_format(surface_format.format)
             .image_color_space(surface_format.color_space)
@@ -152,18 +157,108 @@ impl InnerDevice {
             })
             .collect();
 
-        return InnerSwapchain {
-            swapchain_loader: swapchain_loader,
-            handle: swapchain,
-            images: images,
-            image_views: image_views,
+        return (swapchain_loader, swapchain, images, image_views);
+    }
+}
+
+// Gpu Resources //
+impl InnerDevice {
+    pub(crate) fn create_buffer_data(
+        &self,
+        buffer_desc: &BufferDescription,
+    ) -> (vk::Buffer, vk_mem::Allocation, vk_mem::AllocationInfo) {
+        let buffer_create_info = vk::BufferCreateInfo::default()
+            .usage(buffer_desc.usage.to_vk_flag())
+            .size(buffer_desc.size);
+
+        let allocation_create_info = vk_mem::AllocationCreateInfo {
+            usage: buffer_desc.memory_type.to_vk_flag(),
+            ..Default::default()
         };
+
+        let (buffer, allocation) = unsafe {
+            self.allocator
+                .create_buffer(&buffer_create_info, &allocation_create_info)
+                .expect("Failed to create buffer ")
+        };
+
+        let alloc_info = self.allocator.get_allocation_info(&allocation);
+
+        return (buffer, allocation, alloc_info);
+    }
+
+    pub(crate) fn create_image_data(
+        &self,
+        image_desc: &ImageDescription,
+    ) -> (vk::Image, vk_mem::Allocation, vk_mem::AllocationInfo) {
+        let image_create_info = vk::ImageCreateInfo::default()
+            .usage(image_desc.usage.to_vk_flag())
+            .extent(vk::Extent3D {
+                height: image_desc.height,
+                width: image_desc.width,
+                depth: image_desc.depth,
+            })
+            .format(image_desc.format.to_vk_format())
+            .array_layers(image_desc.array_layers)
+            .mip_levels(image_desc.mip_levels)
+            .initial_layout(vk::ImageLayout::UNDEFINED)
+            .image_type(vk::ImageType::TYPE_2D)
+            .samples(image_desc.samples.to_vk_flags())
+            .tiling(vk::ImageTiling::OPTIMAL);
+
+        let allocation_create_info = vk_mem::AllocationCreateInfo {
+            usage: image_desc.memory_type.to_vk_flag(),
+            ..Default::default()
+        };
+
+        let (image, allocation) = unsafe {
+            self.allocator
+                .create_image(&image_create_info, &allocation_create_info)
+                .expect("Failed to create image")
+        };
+
+        let alloc_info = self.allocator.get_allocation_info(&allocation);
+
+        return (image, allocation, alloc_info);
+    }
+
+    pub(crate) fn create_sampler(&self, sampler_desc: &SamplerDescription) -> vk::Sampler {
+        let create_info = vk::SamplerCreateInfo::default()
+            .mag_filter(sampler_desc.mag_filter.to_vk())
+            .min_filter(sampler_desc.min_filter.to_vk())
+            .mipmap_mode(sampler_desc.mipmap_mode.to_vk())
+            .address_mode_u(sampler_desc.address_mode_u.to_vk())
+            .address_mode_v(sampler_desc.address_mode_v.to_vk())
+            .address_mode_w(sampler_desc.address_mode_w.to_vk())
+            .mip_lod_bias(sampler_desc.mip_lod_bias)
+            .anisotropy_enable(sampler_desc.max_anisotropy.is_some())
+            .max_anisotropy(sampler_desc.max_anisotropy.unwrap_or(1.0))
+            .compare_enable(sampler_desc.compare_op.is_some())
+            .compare_op(
+                sampler_desc
+                    .compare_op
+                    .map(|c| c.to_vk())
+                    .unwrap_or(vk::CompareOp::ALWAYS),
+            )
+            .min_lod(sampler_desc.min_lod)
+            .max_lod(sampler_desc.max_lod)
+            .border_color(sampler_desc.border_color.to_vk())
+            .unnormalized_coordinates(sampler_desc.unnormalized_coordinates);
+
+        let handle = unsafe {
+            self.handle
+                .create_sampler(&create_info, None)
+                .expect("Failed to create sampler")
+        };
+
+        return handle;
     }
 }
 
 impl Drop for InnerDevice {
     fn drop(&mut self) {
         unsafe {
+            std::ptr::drop_in_place(&mut self.allocator);
             self.handle.destroy_device(None);
         }
     }

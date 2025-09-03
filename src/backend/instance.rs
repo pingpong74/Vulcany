@@ -1,21 +1,21 @@
-use super::device::InnerDevice;
+use crate::{
+    ApiVersion,
+    core::{definations::DeviceDescription, definations::InstanceDescription},
+};
 
-use crate::allocator::free_list_allocator::FreeListAllocator;
-use crate::core::instance::{DeviceDescription, InstanceDescription};
-
-use ash;
+use ash::vk;
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle, RawDisplayHandle, RawWindowHandle};
 use std::{ffi::CStr, sync::Arc};
 
 pub(crate) struct Surface {
-    pub(crate) handle: ash::vk::SurfaceKHR,
+    pub(crate) handle: vk::SurfaceKHR,
     pub(crate) loader: ash::khr::surface::Instance,
 }
 
 pub(crate) struct SwapchainSupport {
-    pub capabilities: ash::vk::SurfaceCapabilitiesKHR,
-    pub formats: Vec<ash::vk::SurfaceFormatKHR>,
-    pub present_modes: Vec<ash::vk::PresentModeKHR>,
+    pub capabilities: vk::SurfaceCapabilitiesKHR,
+    pub formats: Vec<vk::SurfaceFormatKHR>,
+    pub present_modes: Vec<vk::PresentModeKHR>,
 }
 
 pub(crate) struct QueueFamilyIndices {
@@ -26,19 +26,20 @@ pub(crate) struct QueueFamilyIndices {
 }
 
 pub(crate) struct PhysicalDevice {
-    pub handle: ash::vk::PhysicalDevice,
+    pub handle: vk::PhysicalDevice,
     pub swapchain_support: SwapchainSupport,
     pub queue_families: QueueFamilyIndices,
-    pub properties: ash::vk::PhysicalDeviceProperties,
+    pub properties: vk::PhysicalDeviceProperties,
 }
 
 pub(crate) struct InnerInstance {
     entry: ash::Entry,
     pub(crate) handle: ash::Instance,
-    debug_messenger: Option<ash::vk::DebugUtilsMessengerEXT>,
+    debug_messenger: Option<vk::DebugUtilsMessengerEXT>,
     debug_loader: Option<ash::ext::debug_utils::Instance>,
     pub(crate) surface: Surface,
     physical_device_extensions: Vec<&'static CStr>,
+    api_version: ApiVersion,
 }
 
 impl InnerInstance {
@@ -84,24 +85,26 @@ impl InnerInstance {
             required_extensions.push(ash::ext::debug_utils::NAME.as_ptr());
         }
 
-        let app_info = ash::vk::ApplicationInfo {
+        let app_info = vk::ApplicationInfo {
             api_version: instance_create_info.api_version.clone() as u32,
             ..Default::default()
         };
 
-        let mut create_info = ash::vk::InstanceCreateInfo::default()
+        let mut create_info = vk::InstanceCreateInfo::default()
             .application_info(&app_info)
             .enabled_extension_names(&required_extensions);
 
-        let mut debug_create_info = ash::vk::DebugUtilsMessengerCreateInfoEXT::default()
+        let mut debug_create_info = vk::DebugUtilsMessengerCreateInfoEXT::default()
             .message_severity(
-                ash::vk::DebugUtilsMessageSeverityFlagsEXT::ERROR
-                    | ash::vk::DebugUtilsMessageSeverityFlagsEXT::WARNING,
+                vk::DebugUtilsMessageSeverityFlagsEXT::ERROR
+                    | vk::DebugUtilsMessageSeverityFlagsEXT::WARNING
+                    | vk::DebugUtilsMessageSeverityFlagsEXT::INFO
+                    | vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE,
             )
             .message_type(
-                ash::vk::DebugUtilsMessageTypeFlagsEXT::GENERAL
-                    | ash::vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE
-                    | ash::vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION,
+                vk::DebugUtilsMessageTypeFlagsEXT::GENERAL
+                    | vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE
+                    | vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION,
             )
             .pfn_user_callback(Some(InnerInstance::vulkan_debug_callback));
 
@@ -115,7 +118,7 @@ impl InnerInstance {
                 .expect("Failed to create instance")
         };
 
-        let mut debug_messenger: Option<ash::vk::DebugUtilsMessengerEXT> = None;
+        let mut debug_messenger: Option<vk::DebugUtilsMessengerEXT> = None;
         let mut debug_loader: Option<ash::ext::debug_utils::Instance> = None;
 
         if instance_create_info.enable_validation_layers {
@@ -142,10 +145,14 @@ impl InnerInstance {
             debug_loader: debug_loader,
             surface: surface,
             physical_device_extensions: vec![ash::khr::swapchain::NAME],
+            api_version: instance_create_info.api_version.clone(),
         };
     }
 
-    pub(crate) fn create_device(&self, device_create_info: &DeviceDescription) -> InnerDevice {
+    pub(crate) fn create_device_data(
+        &self,
+        device_create_info: &DeviceDescription,
+    ) -> (ash::Device, PhysicalDevice, vk_mem::Allocator) {
         let physical_device = {
             let dev = self.select_physical_device();
             if dev.is_none() {
@@ -170,7 +177,7 @@ impl InnerInstance {
         let queue_infos: Vec<_> = unique_families
             .iter()
             .map(|&family| {
-                ash::vk::DeviceQueueCreateInfo::default()
+                vk::DeviceQueueCreateInfo::default()
                     .queue_family_index(family)
                     .queue_priorities(&priorities)
             })
@@ -179,9 +186,9 @@ impl InnerInstance {
         // Required device extensions (swapchain needed for presentation)
         let device_extensions = vec![ash::khr::swapchain::NAME.as_ptr()];
 
-        let features = ash::vk::PhysicalDeviceFeatures::default();
+        let features = vk::PhysicalDeviceFeatures::default();
 
-        let create_info = ash::vk::DeviceCreateInfo::default()
+        let create_info = vk::DeviceCreateInfo::default()
             .queue_create_infos(&queue_infos)
             .enabled_extension_names(&device_extensions)
             .enabled_features(&features);
@@ -192,10 +199,15 @@ impl InnerInstance {
                 .expect("Failed to create logical device")
         };
 
-        return InnerDevice {
-            handle: dev,
-            physical_device: physical_device,
+        let mut allocator_create_info =
+            vk_mem::AllocatorCreateInfo::new(&self.handle, &dev, physical_device.handle);
+        allocator_create_info.vulkan_api_version = self.api_version.clone() as u32;
+
+        let allocator = unsafe {
+            vk_mem::Allocator::new(allocator_create_info).expect("Failed to create vma allocator")
         };
+
+        return (dev, physical_device, allocator);
     }
 }
 
@@ -454,14 +466,20 @@ impl InnerInstance {
 
 //Debug Messenger
 impl InnerInstance {
+    #[allow(unused)]
     unsafe extern "system" fn vulkan_debug_callback(
         severity: ash::vk::DebugUtilsMessageSeverityFlagsEXT,
         types: ash::vk::DebugUtilsMessageTypeFlagsEXT,
         data: *const ash::vk::DebugUtilsMessengerCallbackDataEXT,
         _user: *mut std::ffi::c_void,
     ) -> ash::vk::Bool32 {
-        let message = std::ffi::CStr::from_ptr((*data).p_message);
-        println!("[VULKAN]: {:?}", message);
+        let message = unsafe {
+            std::ffi::CStr::from_ptr((*data).p_message)
+                .to_string_lossy()
+                .into_owned()
+        };
+        println!("[VULKAN, {:?} {:?}]: {}", severity, types, message);
+
         ash::vk::FALSE
     }
 }
