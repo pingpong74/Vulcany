@@ -11,6 +11,7 @@ anyhow = "*"
 log = "*"
 env_logger = { version = "*", optional = true }
 smallvec = "*"
+image = "*"
 
 [dev-dependencies]
 winit = "*"

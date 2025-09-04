@@ -35,27 +35,5 @@ fn main() {
         height: size.height,
     });
 
-    let buffer = device.create_buffer(&BufferDescription {
-        usage: BufferUsage::STAGING,
-        size: 10,
-        memory_type: MemoryType::AUTO,
-    });
-
-    let image = device.create_image(&ImageDescription {
-        width: 200,
-        height: 200,
-        depth: 1,
-        ..Default::default()
-    });
-
-    let image_view = image.create_image_view(&ImageViewDescription {
-        view_type: ImageViewType::TYPE_2D,
-        aspect: ImageAspect::DEPTH,
-        ..Default::default()
-    });
-
-    let sampler = device.create_sampler(&SamplerDescription {
-        min_filter: Filter::Nearest,
-        ..Default::default()
-    });
+    device.create_pipeline_manager();
 }

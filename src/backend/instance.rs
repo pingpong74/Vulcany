@@ -188,10 +188,26 @@ impl InnerInstance {
 
         let features = vk::PhysicalDeviceFeatures::default();
 
+        let mut indexing_features = vk::PhysicalDeviceDescriptorIndexingFeatures::default()
+            .shader_sampled_image_array_non_uniform_indexing(true)
+            .descriptor_binding_partially_bound(true)
+            .runtime_descriptor_array(true)
+            .descriptor_binding_variable_descriptor_count(true)
+            .descriptor_binding_sampled_image_update_after_bind(true)
+            .descriptor_binding_storage_buffer_update_after_bind(true)
+            .descriptor_binding_storage_image_update_after_bind(true)
+            .descriptor_binding_storage_texel_buffer_update_after_bind(true)
+            .descriptor_binding_uniform_buffer_update_after_bind(true)
+            .descriptor_binding_uniform_texel_buffer_update_after_bind(true);
+
+        let mut features2 = vk::PhysicalDeviceFeatures2::default()
+            .push_next(&mut indexing_features)
+            .features(features);
+
         let create_info = vk::DeviceCreateInfo::default()
             .queue_create_infos(&queue_infos)
             .enabled_extension_names(&device_extensions)
-            .enabled_features(&features);
+            .push_next(&mut features2);
 
         let dev = unsafe {
             self.handle

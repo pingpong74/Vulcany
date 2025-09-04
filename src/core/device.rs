@@ -1,16 +1,13 @@
+use image::GenericImageView;
+
 use crate::{
-    ImageDescription, SamplerDescription,
+    Buffer, BufferDescription, Image, ImageDescription, Sampler, SamplerDescription, Swapchain,
+    SwapchainDescription, Texture, TextureDescription,
     backend::{
         buffer::InnerBuffer,
         device::InnerDevice,
         image::{InnerImage, InnerSampler},
         swapchain::InnerSwapchain,
-    },
-    core::{
-        buffer::Buffer,
-        definations::{BufferDescription, SwapchainDescription},
-        image::{Image, Sampler},
-        swapchain::Swapchain,
     },
 };
 use std::sync::Arc;
@@ -72,5 +69,17 @@ impl Device {
                 device: self.inner.clone(),
             }),
         };
+    }
+
+    pub fn create_texture(&self, texture_desc: TextureDescription) -> Texture {
+        let img = image::open(texture_desc.path).expect("Failed to open image");
+        let (width, height) = img.dimensions();
+        let raw_data = img.into_bytes();
+
+        unimplemented!()
+    }
+
+    pub fn create_pipeline_manager(&self) {
+        let (pool, set, layout) = self.inner.create_pipeline_manager_data();
     }
 }

@@ -255,6 +255,108 @@ impl InnerDevice {
     }
 }
 
+impl InnerDevice {
+    //TODO: Need to find max supported and then fill in the data
+    pub(crate) fn create_pipeline_manager_data(
+        &self,
+    ) -> (
+        vk::DescriptorPool,
+        vk::DescriptorSet,
+        vk::DescriptorSetLayout,
+    ) {
+        let max_textures = 100;
+        let max_buffers = 100;
+
+        let pool_sizes = [
+            vk::DescriptorPoolSize {
+                ty: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+                descriptor_count: max_textures,
+            },
+            vk::DescriptorPoolSize {
+                ty: vk::DescriptorType::UNIFORM_BUFFER,
+                descriptor_count: max_buffers,
+            },
+            vk::DescriptorPoolSize {
+                ty: vk::DescriptorType::STORAGE_BUFFER,
+                descriptor_count: max_buffers,
+            },
+        ];
+
+        let pool_create_info = vk::DescriptorPoolCreateInfo::default()
+            .flags(vk::DescriptorPoolCreateFlags::UPDATE_AFTER_BIND)
+            .max_sets(10)
+            .pool_sizes(&pool_sizes);
+
+        let descriptor_pool = unsafe {
+            self.handle
+                .create_descriptor_pool(&pool_create_info, None)
+                .expect("Failed to create bindless descriptor pool")
+        };
+
+        let bindings = [
+            vk::DescriptorSetLayoutBinding::default()
+                .binding(0)
+                .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                .descriptor_count(max_textures)
+                .stage_flags(vk::ShaderStageFlags::FRAGMENT),
+            vk::DescriptorSetLayoutBinding::default()
+                .binding(1)
+                .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                .descriptor_count(max_buffers)
+                .stage_flags(vk::ShaderStageFlags::ALL),
+            vk::DescriptorSetLayoutBinding::default()
+                .binding(2)
+                .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+                .descriptor_count(max_buffers)
+                .stage_flags(vk::ShaderStageFlags::ALL),
+        ];
+
+        let binding_flags = [
+            vk::DescriptorBindingFlags::PARTIALLY_BOUND
+                | vk::DescriptorBindingFlags::UPDATE_AFTER_BIND
+                | vk::DescriptorBindingFlags::VARIABLE_DESCRIPTOR_COUNT,
+            vk::DescriptorBindingFlags::PARTIALLY_BOUND
+                | vk::DescriptorBindingFlags::UPDATE_AFTER_BIND
+                | vk::DescriptorBindingFlags::VARIABLE_DESCRIPTOR_COUNT,
+            vk::DescriptorBindingFlags::PARTIALLY_BOUND
+                | vk::DescriptorBindingFlags::UPDATE_AFTER_BIND
+                | vk::DescriptorBindingFlags::VARIABLE_DESCRIPTOR_COUNT,
+        ];
+
+        let mut binding_flags_info =
+            vk::DescriptorSetLayoutBindingFlagsCreateInfo::default().binding_flags(&binding_flags);
+
+        let layout_info = vk::DescriptorSetLayoutCreateInfo::default()
+            .push_next(&mut binding_flags_info)
+            .flags(vk::DescriptorSetLayoutCreateFlags::UPDATE_AFTER_BIND_POOL)
+            .bindings(&bindings);
+
+        let bindless_set_layout = unsafe {
+            self.handle
+                .create_descriptor_set_layout(&layout_info, None)
+                .expect("Failed to create bindless descriptor set layout")
+        };
+
+        let variable_counts = [10, 10, 10];
+        let mut variable_count_info =
+            vk::DescriptorSetVariableDescriptorCountAllocateInfo::default()
+                .descriptor_counts(&variable_counts);
+
+        let alloc_info = vk::DescriptorSetAllocateInfo::default()
+            .descriptor_pool(descriptor_pool)
+            .set_layouts(std::slice::from_ref(&bindless_set_layout))
+            .push_next(&mut variable_count_info);
+
+        let bindless_set = unsafe {
+            self.handle
+                .allocate_descriptor_sets(&alloc_info)
+                .expect("Failed to create bindless descriptor")
+        }[0];
+
+        return (descriptor_pool, bindless_set, bindless_set_layout);
+    }
+}
+
 impl Drop for InnerDevice {
     fn drop(&mut self) {
         unsafe {

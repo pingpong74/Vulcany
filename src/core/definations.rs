@@ -6,8 +6,6 @@ use std::sync::Arc;
 #[repr(u32)]
 #[derive(Clone)]
 pub enum ApiVersion {
-    VK_API_1_0 = ash::vk::API_VERSION_1_0,
-    VK_API_1_1 = ash::vk::API_VERSION_1_1,
     VK_API_1_2 = ash::vk::API_VERSION_1_2,
     VK_API_1_3 = ash::vk::API_VERSION_1_3,
 }
@@ -282,6 +280,7 @@ pub enum Filter {
     Nearest,
     Linear,
 }
+
 impl Filter {
     pub(crate) fn to_vk(self) -> vk::Filter {
         match self {
@@ -376,7 +375,6 @@ impl CompareOp {
     }
 }
 
-/// High-level sampler description
 pub struct SamplerDescription {
     pub mag_filter: Filter,
     pub min_filter: Filter,
@@ -406,9 +404,28 @@ impl Default for SamplerDescription {
             max_anisotropy: None,
             compare_op: None,
             min_lod: 0.0,
-            max_lod: vk::LOD_CLAMP_NONE,
+            max_lod: 1000.0,
             border_color: BorderColor::IntOpaqueBlack,
             unnormalized_coordinates: false,
         }
+    }
+}
+
+//// TEXTURE DESCRIPTION ////
+pub struct TextureDescription {
+    pub filter: Filter,
+    pub wrap: SamplerAddressMode,
+    pub path: &'static str,
+    pub generate_mips: bool,
+}
+
+impl Default for TextureDescription {
+    fn default() -> Self {
+        return Self {
+            filter: Filter::Linear,
+            wrap: SamplerAddressMode::Repeat,
+            path: " ",
+            generate_mips: true,
+        };
     }
 }

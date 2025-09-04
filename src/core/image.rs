@@ -27,3 +27,9 @@ pub struct ImageView {
 pub struct Sampler {
     pub(crate) inner: Arc<InnerSampler>,
 }
+
+pub struct Texture {
+    image: Image,
+    view: ImageView,
+    sampler: Sampler,
+}
