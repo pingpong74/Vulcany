@@ -429,3 +429,139 @@ impl Default for TextureDescription {
         };
     }
 }
+
+//// Rasterization pipeline create info ////
+#[derive(Clone, Copy)]
+pub enum CullMode {
+    None,
+    Front,
+    Back,
+    FrontAndBack,
+}
+
+impl CullMode {
+    pub(crate) const fn to_vk_flag(&self) -> vk::CullModeFlags {
+        match self {
+            Self::None => vk::CullModeFlags::NONE,
+            Self::Front => vk::CullModeFlags::FRONT,
+            Self::Back => vk::CullModeFlags::BACK,
+            Self::FrontAndBack => vk::CullModeFlags::FRONT_AND_BACK,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+pub enum FrontFace {
+    Clockwise,
+    CounterClockwise,
+}
+
+impl FrontFace {
+    pub(crate) const fn to_vk_flag(&self) -> vk::FrontFace {
+        match self {
+            Self::Clockwise => vk::FrontFace::CLOCKWISE,
+            Self::CounterClockwise => vk::FrontFace::COUNTER_CLOCKWISE,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+pub enum PolygonMode {
+    Fill,
+    Line,
+    Point,
+}
+
+impl PolygonMode {
+    pub(crate) fn to_vk_flag(&self) -> vk::PolygonMode {
+        match self {
+            Self::Fill => vk::PolygonMode::FILL,
+            Self::Line => vk::PolygonMode::LINE,
+            Self::Point => vk::PolygonMode::POINT,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct DepthStencilOptions {
+    pub depth_test_enable: bool,
+    pub depth_write_enable: bool,
+    pub depth_compare_op: vk::CompareOp,
+    pub stencil_test_enable: bool,
+}
+
+impl Default for DepthStencilOptions {
+    fn default() -> Self {
+        Self {
+            depth_test_enable: true,
+            depth_write_enable: true,
+            depth_compare_op: vk::CompareOp::LESS,
+            stencil_test_enable: false,
+        }
+    }
+}
+
+//Vertex description for the pipeline
+#[derive(Clone)]
+pub struct VertexInputDescription {
+    pub bindings: Vec<vk::VertexInputBindingDescription>,
+    pub attributes: Vec<vk::VertexInputAttributeDescription>,
+}
+
+impl Default for VertexInputDescription {
+    fn default() -> Self {
+        return Self {
+            bindings: Vec::new(),
+            attributes: Vec::new(),
+        };
+    }
+}
+
+//Outputs for dynamic rendering
+#[derive(Clone)]
+pub struct PipelineOutputs {
+    pub color: Vec<ImageFormat>,
+    pub depth: Option<ImageFormat>,
+    pub stencil: Option<ImageFormat>,
+}
+
+impl Default for PipelineOutputs {
+    fn default() -> Self {
+        return PipelineOutputs {
+            color: vec![ImageFormat::R16G16B16A16_SFLOAT],
+            depth: None,
+            stencil: None,
+        };
+    }
+}
+
+#[derive(Clone)]
+pub struct RasterizationPipelineDescription {
+    pub vertex_input: VertexInputDescription,
+    pub vertex_shader_path: &'static str,
+    pub fragment_shader_path: &'static str,
+    pub cull_mode: CullMode,
+    pub front_face: FrontFace,
+    pub polygon_mode: PolygonMode,
+    pub line_width: f32,
+    pub depth_stencil: DepthStencilOptions,
+    pub alpha_blend_enable: bool,
+    pub outputs: PipelineOutputs,
+}
+
+impl Default for RasterizationPipelineDescription {
+    fn default() -> Self {
+        Self {
+            vertex_input: VertexInputDescription::default(),
+            vertex_shader_path: " ",
+            fragment_shader_path: " ",
+            cull_mode: CullMode::Back,
+            front_face: FrontFace::CounterClockwise,
+            polygon_mode: PolygonMode::Fill,
+            line_width: 1.0,
+            depth_stencil: DepthStencilOptions::default(),
+            alpha_blend_enable: false,
+            outputs: PipelineOutputs::default(),
+        }
+    }
+}

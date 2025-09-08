@@ -1,12 +1,13 @@
 use image::GenericImageView;
 
 use crate::{
-    Buffer, BufferDescription, Image, ImageDescription, Sampler, SamplerDescription, Swapchain,
-    SwapchainDescription, Texture, TextureDescription,
+    Buffer, BufferDescription, Image, ImageDescription, PipelineManager, Sampler,
+    SamplerDescription, Swapchain, SwapchainDescription, Texture, TextureDescription,
     backend::{
         buffer::InnerBuffer,
         device::InnerDevice,
         image::{InnerImage, InnerSampler},
+        pipelines::InnerPipelineManager,
         swapchain::InnerSwapchain,
     },
 };
@@ -79,7 +80,16 @@ impl Device {
         unimplemented!()
     }
 
-    pub fn create_pipeline_manager(&self) {
+    pub fn create_pipeline_manager(&self) -> PipelineManager {
         let (pool, set, layout) = self.inner.create_pipeline_manager_data();
+
+        return PipelineManager {
+            inner: Arc::new(InnerPipelineManager {
+                desc_pool: pool,
+                desc_layout: layout,
+                desc_set: set,
+                device: self.inner.clone(),
+            }),
+        };
     }
 }

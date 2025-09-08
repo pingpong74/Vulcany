@@ -3,6 +3,12 @@ use winit::{event_loop::EventLoop, window::Window};
 
 use std::sync::Arc;
 
+vertex!(MyVertex {
+    input_rate: VERTEX,
+    pos: [f32; 2] => { location: 0, format: R32G32_SFLOAT },
+    color: [f32; 3] => { location: 1, format: R32G32B32_SFLOAT },
+});
+
 fn main() {
     let event_loop: EventLoop<()> = EventLoop::with_user_event()
         .build()
@@ -35,5 +41,11 @@ fn main() {
         height: size.height,
     });
 
-    device.create_pipeline_manager();
+    let pipeline_manager = device.create_pipeline_manager();
+
+    let buffer = device.create_buffer(&BufferDescription {
+        usage: BufferUsage::VERTEX,
+        size: 1000,
+        memory_type: MemoryType::DEVICE_LOCAL,
+    });
 }

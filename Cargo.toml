@@ -7,11 +7,9 @@ edition = "2024"
 ash = { version = "*", features = ["linked"] }
 vk-mem = "*"
 raw-window-handle = "*"
-anyhow = "*"
-log = "*"
-env_logger = { version = "*", optional = true }
-smallvec = "*"
 image = "*"
+bytemuck = {version = "*", features = ["derive"]}
+memoffset = "*"
 
 [dev-dependencies]
 winit = "*"

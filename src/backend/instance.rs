@@ -97,9 +97,8 @@ impl InnerInstance {
         let mut debug_create_info = vk::DebugUtilsMessengerCreateInfoEXT::default()
             .message_severity(
                 vk::DebugUtilsMessageSeverityFlagsEXT::ERROR
-                    | vk::DebugUtilsMessageSeverityFlagsEXT::WARNING
-                    | vk::DebugUtilsMessageSeverityFlagsEXT::INFO
-                    | vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE,
+                    | vk::DebugUtilsMessageSeverityFlagsEXT::WARNING, //| vk::DebugUtilsMessageSeverityFlagsEXT::INFO
+                                                                      //| vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE,
             )
             .message_type(
                 vk::DebugUtilsMessageTypeFlagsEXT::GENERAL
@@ -188,6 +187,9 @@ impl InnerInstance {
 
         let features = vk::PhysicalDeviceFeatures::default();
 
+        let mut dynamic_rendering_features =
+            vk::PhysicalDeviceDynamicRenderingFeatures::default().dynamic_rendering(true);
+
         let mut indexing_features = vk::PhysicalDeviceDescriptorIndexingFeatures::default()
             .shader_sampled_image_array_non_uniform_indexing(true)
             .descriptor_binding_partially_bound(true)
@@ -202,6 +204,7 @@ impl InnerInstance {
 
         let mut features2 = vk::PhysicalDeviceFeatures2::default()
             .push_next(&mut indexing_features)
+            .push_next(&mut dynamic_rendering_features)
             .features(features);
 
         let create_info = vk::DeviceCreateInfo::default()
