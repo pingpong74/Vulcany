@@ -1,12 +1,13 @@
 use ash::vk;
 
 use crate::backend::device::InnerDevice;
-use std::{
-    collections::HashMap,
-    fs::{self, File},
-    path::Path,
-    sync::Arc,
-};
+use std::collections::HashMap;
+use std::fs::{self, File};
+use std::io::{Read, Write};
+use std::path::Path;
+use std::process::Command;
+use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::RasterizationPipelineDescription;
 
@@ -14,17 +15,21 @@ use crate::RasterizationPipelineDescription;
 // Add a shader chaching system. takes a directory and tracks shaders and only complies if modified
 // Add pipeline cache and also cache common VkPiplineLayouts
 // Add a way to actually write stuff to descriptors (Last priority)
+//
+// TODO (small)
+// Make sure where the cache is bwing created. right now for this 1 example its simple, no need.
 
-pub(crate) struct ShaderMetaData {}
-
-pub(crate) struct ShaderCache {
-    files: HashMap<String, u64>,
+pub(crate) struct InnerPipelineManager {
+    pub(crate) desc_pool: vk::DescriptorPool,
+    pub(crate) desc_layout: vk::DescriptorSetLayout,
+    pub(crate) desc_set: vk::DescriptorSet,
+    pub(crate) device: Arc<InnerDevice>,
 }
 
-// TODO
-// Make sure where the cache is bwing created. right now for this 1 example its simple, no need.
-impl ShaderCache {
-    pub(crate) fn new(shader_path: &str) {
+//// Shader cache impl ////
+impl InnerPipelineManager {
+    pub(crate) fn compile_shaders_in_dir(shader_path: &str) {
+        // Create cache directory if it doesnt exist
         let cache_dir = Path::new(".cache");
 
         if !cache_dir.exists() {
@@ -34,40 +39,87 @@ impl ShaderCache {
             println!(".cache directory already exists");
         }
 
-        let shader_cache = Path::new(".cache/shader_data.json");
+        // Create a shader cache file if not present, if it is present load it
+        let shader_cache_path = Path::new(".cache/shader_data.json");
 
-        let mut file = if !shader_cache.exists() {
-            println!("Create shader cache");
-            File::create(shader_cache)
+        let mut files: HashMap<String, u64> = if shader_cache_path.exists() {
+            let mut contents = String::new();
+            File::open(shader_cache_path)
+                .expect("Failed to open shader cache")
+                .read_to_string(&mut contents)
+                .unwrap();
+            serde_json::from_str(&contents).unwrap_or_default()
         } else {
-            println!("Shader cache already exists");
-            File::open(shader_cache)
+            HashMap::new()
         };
 
+        // Loop over all shaders in the directory
         for entry in
             fs::read_dir(Path::new(shader_path)).expect("Shader directory provided doesnt exist")
         {
             let entry = entry.expect("Err");
             let path = entry.path();
 
-            if path.is_file() {
-                if let Some(ext) = path.extension() {
-                    if ext == "slang" {
-                        println!("Found Slang shader: {}", path.display());
+            if path.is_file() && path.extension().is_some() && path.extension().unwrap() == "slang"
+            {
+                let shader_str = path.to_string_lossy().to_string();
+
+                // Get last modified timestamp of the file
+                let modified = path
+                    .metadata()
+                    .unwrap()
+                    .modified()
+                    .unwrap()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs();
+
+                let needs_recompile = match files.get(&shader_str) {
+                    Some(prev) if *prev >= modified => {
+                        println!("Shader up to date: {}", shader_str);
+                        false
                     }
+                    _ => true,
+                };
+
+                if needs_recompile {
+                    InnerPipelineManager::compile_shader(&path).expect("Failed to compile shader");
+                    files.insert(shader_str, modified);
                 }
             }
         }
+
+        let json =
+            serde_json::to_string_pretty(&files).expect("Failed to turn hash map into a string");
+        std::fs::write(".cache/shader_data.json", json).expect("Failed to write to shader cache");
+    }
+
+    fn compile_shader(path: &Path) -> std::io::Result<()> {
+        let output = Command::new("slangc")
+            .arg(path)
+            .arg("-o")
+            .arg(
+                Path::new(".cache")
+                    .join(path.file_name().unwrap())
+                    .with_extension("spv"),
+            ) // replaces .slang with .spv and also places the compiled shaders inside the .cache directory
+            .output()?;
+
+        if !output.status.success() {
+            eprintln!(
+                "Failed to compile shader {:?}: {}",
+                path,
+                String::from_utf8_lossy(&output.stderr)
+            );
+        } else {
+            println!("Compiled shader {:?}", path);
+        }
+
+        Ok(())
     }
 }
 
-pub(crate) struct InnerPipelineManager {
-    pub(crate) desc_pool: vk::DescriptorPool,
-    pub(crate) desc_layout: vk::DescriptorSetLayout,
-    pub(crate) desc_set: vk::DescriptorSet,
-    pub(crate) device: Arc<InnerDevice>,
-}
-
+//// Pipeline creation ////
 impl InnerPipelineManager {
     pub(crate) fn create_raster_pipeline_data(
         &self,
@@ -252,7 +304,7 @@ impl InnerPipelineManager {
     }
 }
 
-////Private funcs////
+//// Helpers ////
 impl InnerPipelineManager {
     fn read_spv_file(path: &str) -> Vec<u32> {
         use std::fs::File;

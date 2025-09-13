@@ -1,4 +1,3 @@
-
 struct VertexInput {
   [[vk::location(0)]]
   float2 pos;

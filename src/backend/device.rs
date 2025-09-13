@@ -1,6 +1,6 @@
 use crate::{
     BufferDescription, ImageDescription, SamplerDescription, SwapchainDescription,
-    backend::{instance::InnerInstance, pipelines::ShaderCache},
+    backend::{instance::InnerInstance, pipelines::InnerPipelineManager},
 };
 
 use super::instance::PhysicalDevice;
@@ -255,6 +255,7 @@ impl InnerDevice {
     }
 }
 
+// Pipeline Manager //
 impl InnerDevice {
     //TODO: Need to find max supported and then fill in the data
     pub(crate) fn create_pipeline_manager_data(
@@ -353,7 +354,7 @@ impl InnerDevice {
                 .expect("Failed to create bindless descriptor")
         }[0];
 
-        ShaderCache::new("examples/shaders");
+        InnerPipelineManager::compile_shaders_in_dir("examples/shaders");
 
         return (descriptor_pool, bindless_set, bindless_set_layout);
     }
