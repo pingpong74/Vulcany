@@ -1,9 +1,65 @@
 use ash::vk;
 
 use crate::backend::device::InnerDevice;
-use std::sync::Arc;
+use std::{
+    collections::HashMap,
+    fs::{self, File},
+    path::Path,
+    sync::Arc,
+};
 
 use crate::RasterizationPipelineDescription;
+
+// TODO
+// Add a shader chaching system. takes a directory and tracks shaders and only complies if modified
+// Add pipeline cache and also cache common VkPiplineLayouts
+// Add a way to actually write stuff to descriptors (Last priority)
+
+pub(crate) struct ShaderMetaData {}
+
+pub(crate) struct ShaderCache {
+    files: HashMap<String, u64>,
+}
+
+// TODO
+// Make sure where the cache is bwing created. right now for this 1 example its simple, no need.
+impl ShaderCache {
+    pub(crate) fn new(shader_path: &str) {
+        let cache_dir = Path::new(".cache");
+
+        if !cache_dir.exists() {
+            fs::create_dir_all(cache_dir).expect("Failed to create cache directory");
+            println!(".cache directory created");
+        } else {
+            println!(".cache directory already exists");
+        }
+
+        let shader_cache = Path::new(".cache/shader_data.json");
+
+        let mut file = if !shader_cache.exists() {
+            println!("Create shader cache");
+            File::create(shader_cache)
+        } else {
+            println!("Shader cache already exists");
+            File::open(shader_cache)
+        };
+
+        for entry in
+            fs::read_dir(Path::new(shader_path)).expect("Shader directory provided doesnt exist")
+        {
+            let entry = entry.expect("Err");
+            let path = entry.path();
+
+            if path.is_file() {
+                if let Some(ext) = path.extension() {
+                    if ext == "slang" {
+                        println!("Found Slang shader: {}", path.display());
+                    }
+                }
+            }
+        }
+    }
+}
 
 pub(crate) struct InnerPipelineManager {
     pub(crate) desc_pool: vk::DescriptorPool,
@@ -131,27 +187,46 @@ impl InnerPipelineManager {
         let dynamic_state =
             vk::PipelineDynamicStateCreateInfo::default().dynamic_states(&dynamic_states);
 
-        let mut dynamic_rendering_info = vk::PipelineRenderingCreateInfo::default()
-            .color_attachment_formats(
-                raster_pipeline_desc
-                    .outputs
-                    .color
-                    .iter()
-                    .map(|f| f.to_vk_format())
-                    .collect::<Vec<vk::Format>>()
-                    .as_slice(),
-            );
+        let color_formats = raster_pipeline_desc
+            .outputs
+            .color
+            .iter()
+            .map(|f| f.to_vk_format())
+            .collect::<Vec<vk::Format>>();
 
-        if raster_pipeline_desc.outputs.depth.is_some() {
-            dynamic_rendering_info.depth_attachment_format(
-                raster_pipeline_desc
-                    .outputs
-                    .depth
-                    .as_ref()
-                    .unwrap()
-                    .to_vk_format(),
-            );
-        }
+        //Dynamic rendering
+        let mut dynamic_rendering_info = {
+            let a = vk::PipelineRenderingCreateInfo::default()
+                .color_attachment_formats(color_formats.as_slice());
+            let b = if raster_pipeline_desc.outputs.depth.is_some() {
+                a.depth_attachment_format(
+                    raster_pipeline_desc
+                        .outputs
+                        .depth
+                        .clone()
+                        .unwrap()
+                        .to_vk_format(),
+                )
+            } else {
+                a
+            };
+
+            let c = if raster_pipeline_desc.outputs.stencil.is_some() {
+                b.stencil_attachment_format(
+                    raster_pipeline_desc
+                        .outputs
+                        .stencil
+                        .clone()
+                        .unwrap()
+                        .to_vk_format(),
+                )
+            } else {
+                b
+            };
+
+            c
+        };
+
         //Pipeline info
         let pipeline_info = vk::GraphicsPipelineCreateInfo::default()
             .stages(&shader_stages)
@@ -163,7 +238,8 @@ impl InnerPipelineManager {
             .depth_stencil_state(&depth_stencil)
             .color_blend_state(&color_blend_state)
             .dynamic_state(&dynamic_state)
-            .layout(pipeline_layout);
+            .layout(pipeline_layout)
+            .push_next(&mut dynamic_rendering_info);
 
         let pipeline = unsafe {
             self.device

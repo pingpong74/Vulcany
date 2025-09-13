@@ -1,6 +1,6 @@
 use crate::{
     BufferDescription, ImageDescription, SamplerDescription, SwapchainDescription,
-    backend::instance::InnerInstance,
+    backend::{instance::InnerInstance, pipelines::ShaderCache},
 };
 
 use super::instance::PhysicalDevice;
@@ -352,6 +352,8 @@ impl InnerDevice {
                 .allocate_descriptor_sets(&alloc_info)
                 .expect("Failed to create bindless descriptor")
         }[0];
+
+        ShaderCache::new("examples/shaders");
 
         return (descriptor_pool, bindless_set, bindless_set_layout);
     }

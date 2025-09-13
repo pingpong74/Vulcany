@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 vertex!(MyVertex {
     input_rate: VERTEX,
-    pos: [f32; 2] => { location: 0, format: R32G32_SFLOAT },
+    pos: [f32; 3] => { location: 0, format: R32G32_SFLOAT },
     color: [f32; 3] => { location: 1, format: R32G32B32_SFLOAT },
 });
 
@@ -42,6 +42,23 @@ fn main() {
     });
 
     let pipeline_manager = device.create_pipeline_manager();
+
+    /*pipeline_manager.create_rasterization_pipeline(&RasterizationPipelineDescription {
+        vertex_input: MyVertex::vertex_input_description(),
+        vertex_shader_path: (),
+        fragment_shader_path: (),
+        cull_mode: CullMode::Back,
+        front_face: FrontFace::CounterClockwise,
+        polygon_mode: PolygonMode::Fill,
+        line_width: 0.5,
+        depth_stencil: DepthStencilOptions::default(),
+        alpha_blend_enable: true,
+        outputs: PipelineOutputs {
+            color: vec![ImageFormat::B8G8R8A8_UNORM],
+            depth: None,
+            stencil: None,
+        },
+    });*/
 
     let buffer = device.create_buffer(&BufferDescription {
         usage: BufferUsage::VERTEX,
