@@ -43,10 +43,10 @@ fn main() {
 
     let pipeline_manager = device.create_pipeline_manager();
 
-    /*pipeline_manager.create_rasterization_pipeline(&RasterizationPipelineDescription {
+    pipeline_manager.create_rasterization_pipeline(&RasterizationPipelineDescription {
         vertex_input: MyVertex::vertex_input_description(),
-        vertex_shader_path: (),
-        fragment_shader_path: (),
+        vertex_shader_path: ".cache/vertex_shader.spv",
+        fragment_shader_path: ".cache/fragment_shader.spv",
         cull_mode: CullMode::Back,
         front_face: FrontFace::CounterClockwise,
         polygon_mode: PolygonMode::Fill,
@@ -58,7 +58,7 @@ fn main() {
             depth: None,
             stencil: None,
         },
-    });*/
+    });
 
     let buffer = device.create_buffer(&BufferDescription {
         usage: BufferUsage::VERTEX,

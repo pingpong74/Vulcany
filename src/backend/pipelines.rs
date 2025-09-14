@@ -3,16 +3,16 @@ use ash::vk;
 use crate::backend::device::InnerDevice;
 use std::collections::HashMap;
 use std::fs::{self, File};
-use std::io::{Read, Write};
+use std::io::Read;
 use std::path::Path;
 use std::process::Command;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::UNIX_EPOCH;
 
 use crate::RasterizationPipelineDescription;
 
 // TODO
-// Add a shader chaching system. takes a directory and tracks shaders and only complies if modified
+// Create a hash map which stores all .slag files as key and compiled .spv files as data.
 // Add pipeline cache and also cache common VkPiplineLayouts
 // Add a way to actually write stuff to descriptors (Last priority)
 //
@@ -336,5 +336,24 @@ impl Drop for InnerPipelineManager {
                 .handle
                 .destroy_descriptor_pool(self.desc_pool, None);
         };
+    }
+}
+
+//==================== Rasterization Pipeline impl ==================== //
+
+pub(crate) struct InnerRasterizationPipeline {
+    pub(crate) handle: vk::Pipeline,
+    pub(crate) layout: vk::PipelineLayout,
+    pub(crate) manager: Arc<InnerPipelineManager>,
+}
+
+impl Drop for InnerRasterizationPipeline {
+    fn drop(&mut self) {
+        unsafe {
+            self.manager
+                .device
+                .handle
+                .destroy_pipeline(self.handle, None);
+        }
     }
 }

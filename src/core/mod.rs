@@ -1,5 +1,6 @@
 pub mod buffer;
 
+pub mod commands;
 pub mod definations;
 pub mod device;
 pub mod image;
