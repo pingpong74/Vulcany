@@ -1,14 +1,15 @@
 use crate::{
-    BufferDescription, BufferID, ImageDescription, SamplerDescription, SwapchainDescription,
+    BufferDescription, BufferID, ImageDescription, ImageID, ImageViewDescription, ImageViewID,
+    SamplerDescription, SamplerID, SwapchainDescription,
     backend::{
-        gpu_resources::{BufferSlot, GpuResourcePool},
+        gpu_resources::{BufferSlot, GpuResourcePool, ImageSlot, ImageViewSlot, SamplerSlot},
         instance::InnerInstance,
         pipelines::InnerPipelineManager,
     },
 };
 
 use super::instance::PhysicalDevice;
-use ash::{self, vk};
+use ash::vk;
 use std::sync::{Arc, RwLock};
 use vk_mem::*;
 
@@ -20,6 +21,9 @@ pub(crate) struct InnerDevice {
 
     //Pools for various gpu resources
     pub(crate) buffer_pool: RwLock<GpuResourcePool<BufferSlot>>,
+    pub(crate) image_pool: RwLock<GpuResourcePool<ImageSlot>>,
+    pub(crate) image_view_pool: RwLock<GpuResourcePool<ImageViewSlot>>,
+    pub(crate) sampler_pool: RwLock<GpuResourcePool<SamplerSlot>>,
 }
 
 // Swapchain Creation //
@@ -207,12 +211,9 @@ impl InnerDevice {
     }
 }
 
-// Image, Image View and Sampler //
-/*impl InnerDevice {
-    pub(crate) fn create_image_data(
-        &self,
-        image_desc: &ImageDescription,
-    ) -> (vk::Image, Allocation) {
+// Image //
+impl InnerDevice {
+    pub(crate) fn create_image(&self, image_desc: &ImageDescription) -> ImageID {
         let image_create_info = vk::ImageCreateInfo::default()
             .usage(image_desc.usage.to_vk_flag())
             .extent(vk::Extent3D {
@@ -241,10 +242,85 @@ impl InnerDevice {
 
         let alloc_info = self.allocator.get_allocation_info(&allocation);
 
-        return (image, allocation, alloc_info);
+        let id = self.image_pool.write().unwrap().add(ImageSlot {
+            handle: image,
+            allocation: allocation,
+            alloc_info: alloc_info,
+            format: image_desc.format.to_vk_format(),
+        });
+
+        return ImageID { id: id };
     }
 
-    pub(crate) fn create_sampler(&self, sampler_desc: &SamplerDescription) -> vk::Sampler {
+    pub(crate) fn destroy_image(&self, id: ImageID) {
+        let mut img = self.image_pool.write().unwrap().delete(id.id);
+
+        unsafe {
+            self.allocator
+                .destroy_image(img.handle, &mut img.allocation);
+        };
+    }
+}
+
+// Image View //
+impl InnerDevice {
+    pub(crate) fn create_image_view(
+        &self,
+        image_id: ImageID,
+        image_view_description: &ImageViewDescription,
+    ) -> ImageViewID {
+        let pool = self.image_pool.read().unwrap();
+        let img = pool.get_ref(image_id.id);
+
+        let image_view_create_info = vk::ImageViewCreateInfo::default()
+            .image(img.handle)
+            .view_type(image_view_description.view_type.to_vk_type())
+            .format(img.format)
+            .components(vk::ComponentMapping {
+                r: vk::ComponentSwizzle::IDENTITY,
+                g: vk::ComponentSwizzle::IDENTITY,
+                b: vk::ComponentSwizzle::IDENTITY,
+                a: vk::ComponentSwizzle::IDENTITY,
+            })
+            .subresource_range(
+                vk::ImageSubresourceRange::default()
+                    .aspect_mask(image_view_description.aspect.to_vk_aspect())
+                    .base_mip_level(image_view_description.base_mip_level)
+                    .level_count(image_view_description.layer_count)
+                    .base_array_layer(image_view_description.base_array_layer)
+                    .layer_count(image_view_description.layer_count),
+            );
+
+        let image_view = unsafe {
+            self.handle
+                .create_image_view(&image_view_create_info, None)
+                .expect("Failed to create Image view")
+        };
+
+        let id = self.image_view_pool.write().unwrap().add(ImageViewSlot {
+            handle: image_view,
+            parent_image: img.handle,
+        });
+
+        return ImageViewID { id: id };
+    }
+
+    pub(crate) fn destroy_image_view(&self, image_view_id: ImageViewID) {
+        let img_view = self
+            .image_view_pool
+            .write()
+            .unwrap()
+            .delete(image_view_id.id);
+
+        unsafe {
+            self.handle.destroy_image_view(img_view.handle, None);
+        }
+    }
+}
+
+// Sampler //
+impl InnerDevice {
+    pub(crate) fn create_sampler(&self, sampler_desc: &SamplerDescription) -> SamplerID {
         let create_info = vk::SamplerCreateInfo::default()
             .mag_filter(sampler_desc.mag_filter.to_vk())
             .min_filter(sampler_desc.min_filter.to_vk())
@@ -267,15 +343,29 @@ impl InnerDevice {
             .border_color(sampler_desc.border_color.to_vk())
             .unnormalized_coordinates(sampler_desc.unnormalized_coordinates);
 
-        let handle = unsafe {
+        let sampler = unsafe {
             self.handle
                 .create_sampler(&create_info, None)
                 .expect("Failed to create sampler")
         };
 
-        return handle;
+        let id = self
+            .sampler_pool
+            .write()
+            .unwrap()
+            .add(SamplerSlot { handle: sampler });
+
+        return SamplerID { id: id };
     }
-}*/
+
+    pub(crate) fn destroy_sampler(&self, sampler_id: SamplerID) {
+        let sampler = self.sampler_pool.write().unwrap().delete(sampler_id.id);
+
+        unsafe {
+            self.handle.destroy_sampler(sampler.handle, None);
+        };
+    }
+}
 
 // Pipeline Manager //
 impl InnerDevice {

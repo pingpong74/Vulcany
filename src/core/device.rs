@@ -3,13 +3,7 @@ use image::GenericImageView;
 use crate::{
     BufferDescription, BufferID, ImageDescription, ImageID, PipelineManager, SamplerDescription,
     SamplerID, Swapchain, SwapchainDescription,
-    backend::{
-        buffer::InnerBuffer,
-        device::InnerDevice,
-        image::{InnerImage, InnerSampler},
-        pipelines::InnerPipelineManager,
-        swapchain::InnerSwapchain,
-    },
+    backend::{device::InnerDevice, pipelines::InnerPipelineManager, swapchain::InnerSwapchain},
 };
 use std::sync::Arc;
 

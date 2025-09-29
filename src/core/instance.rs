@@ -36,7 +36,12 @@ impl Instance {
                 physical_device: physical_device,
                 allocator: allocator,
                 instance: self.inner.clone(),
+
+                //Resource Pools
                 buffer_pool: RwLock::new(GpuResourcePool::new()),
+                image_pool: RwLock::new(GpuResourcePool::new()),
+                image_view_pool: RwLock::new(GpuResourcePool::new()),
+                sampler_pool: RwLock::new(GpuResourcePool::new()),
             }),
         };
     }
