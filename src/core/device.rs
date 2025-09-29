@@ -1,8 +1,8 @@
 use image::GenericImageView;
 
 use crate::{
-    Buffer, BufferDescription, Image, ImageDescription, PipelineManager, Sampler,
-    SamplerDescription, Swapchain, SwapchainDescription, Texture, TextureDescription,
+    BufferDescription, BufferID, ImageDescription, ImageID, PipelineManager, SamplerDescription,
+    SamplerID, Swapchain, SwapchainDescription,
     backend::{
         buffer::InnerBuffer,
         device::InnerDevice,
@@ -13,11 +13,18 @@ use crate::{
 };
 use std::sync::Arc;
 
+//We need to swwitch to an ID system for buffers, images and other gpu resources now.
+//
+// Have a Gpu resource pool class which will handle all this stuff
+//
+// Have a create and destroy function for each resource, need to sacrifice RAII
+
 #[derive(Clone)]
 pub struct Device {
     pub(crate) inner: Arc<InnerDevice>,
 }
 
+//Swapchain Impl//
 impl Device {
     pub fn create_swapchain(&self, swapchain_desc: &SwapchainDescription) -> Swapchain {
         let (loader, swapchain, images, image_views) =
@@ -33,53 +40,21 @@ impl Device {
             }),
         };
     }
+}
 
-    pub fn create_buffer(&self, buffer_desc: &BufferDescription) -> Buffer {
-        let (buffer, allocation, alloc_info) = self.inner.create_buffer_data(buffer_desc);
-
-        return Buffer {
-            inner: Arc::new(InnerBuffer {
-                handle: buffer,
-                allocation: allocation,
-                allocation_info: alloc_info,
-                device: self.inner.clone(),
-            }),
-        };
+// Buffer Impl //
+impl Device {
+    pub fn create_buffer(&self, buffer_desc: &BufferDescription) -> BufferID {
+        return self.inner.create_buffer(buffer_desc);
     }
 
-    pub fn create_image(&self, image_desc: &ImageDescription) -> Image {
-        let (image, allocation, allocation_info) = self.inner.create_image_data(image_desc);
-
-        return Image {
-            inner: Arc::new(InnerImage {
-                handle: image,
-                allocation: allocation,
-                allocation_info: allocation_info,
-                format: image_desc.format.to_vk_format(),
-                device: self.inner.clone(),
-            }),
-        };
+    pub fn destroy_buffer(&self, id: BufferID) {
+        self.inner.destroy_buffer(id.id);
     }
+}
 
-    pub fn create_sampler(&self, sampler_desc: &SamplerDescription) -> Sampler {
-        let sampler = self.inner.create_sampler(sampler_desc);
-
-        return Sampler {
-            inner: Arc::new(InnerSampler {
-                handle: sampler,
-                device: self.inner.clone(),
-            }),
-        };
-    }
-
-    pub fn create_texture(&self, texture_desc: TextureDescription) -> Texture {
-        let img = image::open(texture_desc.path).expect("Failed to open image");
-        let (width, height) = img.dimensions();
-        let raw_data = img.into_bytes();
-
-        unimplemented!()
-    }
-
+// Pipeline Manager //
+impl Device {
     pub fn create_pipeline_manager(&self) -> PipelineManager {
         let (pool, set, layout) = self.inner.create_pipeline_manager_data();
 

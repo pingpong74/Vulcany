@@ -1,18 +1,25 @@
 use crate::{
-    BufferDescription, ImageDescription, SamplerDescription, SwapchainDescription,
-    backend::{instance::InnerInstance, pipelines::InnerPipelineManager},
+    BufferDescription, BufferID, ImageDescription, SamplerDescription, SwapchainDescription,
+    backend::{
+        gpu_resources::{BufferSlot, GpuResourcePool},
+        instance::InnerInstance,
+        pipelines::InnerPipelineManager,
+    },
 };
 
 use super::instance::PhysicalDevice;
 use ash::{self, vk};
-use std::sync::Arc;
-use vk_mem::Alloc;
+use std::sync::{Arc, RwLock};
+use vk_mem::*;
 
 pub(crate) struct InnerDevice {
-    pub(crate) allocator: vk_mem::Allocator,
+    pub(crate) allocator: Allocator,
     pub(crate) handle: ash::Device,
     pub(crate) physical_device: PhysicalDevice,
     pub(crate) instance: Arc<InnerInstance>,
+
+    //Pools for various gpu resources
+    pub(crate) buffer_pool: RwLock<GpuResourcePool<BufferSlot>>,
 }
 
 // Swapchain Creation //
@@ -161,12 +168,9 @@ impl InnerDevice {
     }
 }
 
-// Gpu Resources //
+// Buffer //
 impl InnerDevice {
-    pub(crate) fn create_buffer_data(
-        &self,
-        buffer_desc: &BufferDescription,
-    ) -> (vk::Buffer, vk_mem::Allocation, vk_mem::AllocationInfo) {
+    pub(crate) fn create_buffer(&self, buffer_desc: &BufferDescription) -> BufferID {
         let buffer_create_info = vk::BufferCreateInfo::default()
             .usage(buffer_desc.usage.to_vk_flag())
             .size(buffer_desc.size);
@@ -184,13 +188,31 @@ impl InnerDevice {
 
         let alloc_info = self.allocator.get_allocation_info(&allocation);
 
-        return (buffer, allocation, alloc_info);
+        let id = self.buffer_pool.write().unwrap().add(BufferSlot {
+            handle: buffer,
+            allocation: allocation,
+            alloc_info: alloc_info,
+        });
+
+        return BufferID { id: id };
     }
 
+    pub(crate) fn destroy_buffer(&self, id: u64) {
+        let mut res = self.buffer_pool.write().unwrap().delete(id);
+
+        unsafe {
+            self.allocator
+                .destroy_buffer(res.handle, &mut res.allocation);
+        }
+    }
+}
+
+// Image, Image View and Sampler //
+/*impl InnerDevice {
     pub(crate) fn create_image_data(
         &self,
         image_desc: &ImageDescription,
-    ) -> (vk::Image, vk_mem::Allocation, vk_mem::AllocationInfo) {
+    ) -> (vk::Image, Allocation) {
         let image_create_info = vk::ImageCreateInfo::default()
             .usage(image_desc.usage.to_vk_flag())
             .extent(vk::Extent3D {
@@ -253,7 +275,7 @@ impl InnerDevice {
 
         return handle;
     }
-}
+}*/
 
 // Pipeline Manager //
 impl InnerDevice {

@@ -1,8 +1,9 @@
 use crate::backend::{
     device::InnerDevice,
+    gpu_resources::GpuResourcePool,
     instance::{InnerInstance, PhysicalDevice},
 };
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use super::{
     definations::{DeviceDescription, InstanceDescription},
@@ -35,6 +36,7 @@ impl Instance {
                 physical_device: physical_device,
                 allocator: allocator,
                 instance: self.inner.clone(),
+                buffer_pool: RwLock::new(GpuResourcePool::new()),
             }),
         };
     }

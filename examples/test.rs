@@ -35,7 +35,15 @@ fn main() {
         use_transfer_queue: true,
     });
 
-    let swapchain = device.create_swapchain(&SwapchainDescription {
+    let bufferID = device.create_buffer(&BufferDescription {
+        usage: BufferUsage::VERTEX,
+        size: 1000,
+        memory_type: MemoryType::DEVICE_LOCAL,
+    });
+
+    device.destroy_buffer(bufferID);
+
+    /*let swapchain = device.create_swapchain(&SwapchainDescription {
         image_count: 3,
         width: size.width,
         height: size.height,
@@ -58,11 +66,5 @@ fn main() {
             depth: None,
             stencil: None,
         },
-    });
-
-    let buffer = device.create_buffer(&BufferDescription {
-        usage: BufferUsage::VERTEX,
-        size: 1000,
-        memory_type: MemoryType::DEVICE_LOCAL,
-    });
+    });*/
 }

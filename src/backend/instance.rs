@@ -6,6 +6,7 @@ use crate::{
 use ash::vk;
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle, RawDisplayHandle, RawWindowHandle};
 use std::{ffi::CStr, sync::Arc};
+use vk_mem::AllocatorCreateInfo;
 
 pub(crate) struct Surface {
     pub(crate) handle: vk::SurfaceKHR,

@@ -15,3 +15,6 @@ serde_json = "*"
 
 [dev-dependencies]
 winit = "*"
+
+[allow]
+unused = "*"
