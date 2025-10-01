@@ -201,8 +201,8 @@ impl InnerDevice {
         return BufferID { id: id };
     }
 
-    pub(crate) fn destroy_buffer(&self, id: u64) {
-        let mut res = self.buffer_pool.write().unwrap().delete(id);
+    pub(crate) fn destroy_buffer(&self, id: BufferID) {
+        let mut res = self.buffer_pool.write().unwrap().delete(id.id);
 
         unsafe {
             self.allocator
@@ -372,6 +372,7 @@ impl InnerDevice {
     //TODO: Need to find max supported and then fill in the data
     pub(crate) fn create_pipeline_manager_data(
         &self,
+        shader_directory: &str,
     ) -> (
         vk::DescriptorPool,
         vk::DescriptorSet,
@@ -466,7 +467,7 @@ impl InnerDevice {
                 .expect("Failed to create bindless descriptor")
         }[0];
 
-        InnerPipelineManager::compile_shaders_in_dir("examples/shaders");
+        InnerPipelineManager::compile_shaders_in_dir(shader_directory);
 
         return (descriptor_pool, bindless_set, bindless_set_layout);
     }

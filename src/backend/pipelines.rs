@@ -9,7 +9,16 @@ use std::process::Command;
 use std::sync::Arc;
 use std::time::UNIX_EPOCH;
 
+use serde::{Deserialize, Serialize};
+
 use crate::RasterizationPipelineDescription;
+
+#[derive(Serialize, Deserialize, Debug)]
+struct ShaderCacheEntry {
+    slang: String,
+    spv: String,
+    timestamp: u64,
+}
 
 // TODO
 // Create a hash map which stores all .slag files as key and compiled .spv files as data.
@@ -20,6 +29,7 @@ use crate::RasterizationPipelineDescription;
 // Make sure where the cache is bwing created. right now for this 1 example its simple, no need.
 
 pub(crate) struct InnerPipelineManager {
+    pub(crate) shader_directory: String,
     pub(crate) desc_pool: vk::DescriptorPool,
     pub(crate) desc_layout: vk::DescriptorSetLayout,
     pub(crate) desc_set: vk::DescriptorSet,
@@ -42,7 +52,7 @@ impl InnerPipelineManager {
         // Create a shader cache file if not present, if it is present load it
         let shader_cache_path = Path::new(".cache/shader_data.json");
 
-        let mut files: HashMap<String, u64> = if shader_cache_path.exists() {
+        let mut files: HashMap<String, ShaderCacheEntry> = if shader_cache_path.exists() {
             let mut contents = String::new();
             File::open(shader_cache_path)
                 .expect("Failed to open shader cache")
@@ -75,7 +85,7 @@ impl InnerPipelineManager {
                     .as_secs();
 
                 let needs_recompile = match files.get(&shader_str) {
-                    Some(prev) if *prev >= modified => {
+                    Some(prev) if (*prev).timestamp >= modified => {
                         println!("Shader up to date: {}", shader_str);
                         false
                     }
@@ -84,7 +94,21 @@ impl InnerPipelineManager {
 
                 if needs_recompile {
                     InnerPipelineManager::compile_shader(&path).expect("Failed to compile shader");
-                    files.insert(shader_str, modified);
+
+                    let spv_path = Path::new(".cache")
+                        .join(path.file_name().unwrap())
+                        .with_extension("spv")
+                        .to_string_lossy()
+                        .to_string();
+
+                    files.insert(
+                        shader_str.clone(),
+                        ShaderCacheEntry {
+                            slang: shader_str,
+                            spv: spv_path,
+                            timestamp: modified,
+                        },
+                    );
                 }
             }
         }
@@ -117,6 +141,15 @@ impl InnerPipelineManager {
 
         Ok(())
     }
+
+    fn get_spv_path(&self, slang_path: &str) -> Option<String> {
+        let path = format!("{}/{}", self.shader_directory, slang_path);
+        println!("{}", path);
+
+        let contents = std::fs::read_to_string(".cache/shader_data.json").ok()?;
+        let files: HashMap<String, ShaderCacheEntry> = serde_json::from_str(&contents).ok()?;
+        files.get(&path).map(|entry| entry.spv.clone())
+    }
 }
 
 //// Pipeline creation ////
@@ -125,11 +158,17 @@ impl InnerPipelineManager {
         &self,
         raster_pipeline_desc: &RasterizationPipelineDescription,
     ) -> (vk::Pipeline, vk::PipelineLayout) {
+        let vertex_shader_path = self
+            .get_spv_path(raster_pipeline_desc.vertex_shader_path)
+            .unwrap_or_else(|| panic!("Wrong vertex shader path provided"));
+
+        let fragment_shader_path = self
+            .get_spv_path(raster_pipeline_desc.fragment_shader_path)
+            .unwrap_or_else(|| panic!("Wrong fragment shader path provided"));
+
         //Shaders
-        let vert_code =
-            InnerPipelineManager::read_spv_file(&raster_pipeline_desc.vertex_shader_path);
-        let frag_code =
-            InnerPipelineManager::read_spv_file(&raster_pipeline_desc.fragment_shader_path);
+        let vert_code = InnerPipelineManager::read_spv_file(&vertex_shader_path);
+        let frag_code = InnerPipelineManager::read_spv_file(&fragment_shader_path);
 
         let vert_module_create_info = vk::ShaderModuleCreateInfo::default().code(&vert_code);
         let frag_module_create_info = vk::ShaderModuleCreateInfo::default().code(&frag_code);

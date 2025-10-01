@@ -1,8 +1,8 @@
 use image::GenericImageView;
 
 use crate::{
-    BufferDescription, BufferID, ImageDescription, ImageID, PipelineManager, SamplerDescription,
-    SamplerID, Swapchain, SwapchainDescription,
+    BufferDescription, BufferID, ImageDescription, ImageID, ImageViewDescription, ImageViewID,
+    PipelineManager, SamplerDescription, SamplerID, Swapchain, SwapchainDescription,
     backend::{device::InnerDevice, pipelines::InnerPipelineManager, swapchain::InnerSwapchain},
 };
 use std::sync::Arc;
@@ -36,24 +36,51 @@ impl Device {
     }
 }
 
-// Buffer Impl //
+// Buffer //
 impl Device {
     pub fn create_buffer(&self, buffer_desc: &BufferDescription) -> BufferID {
         return self.inner.create_buffer(buffer_desc);
     }
 
     pub fn destroy_buffer(&self, id: BufferID) {
-        self.inner.destroy_buffer(id.id);
+        self.inner.destroy_buffer(id);
+    }
+}
+
+// Image //
+impl Device {
+    pub fn create_image(&self, image_desc: &ImageDescription) -> ImageID {
+        return self.inner.create_image(image_desc);
+    }
+
+    pub fn destroy_image(&self, image_id: ImageID) {
+        self.inner.destroy_image(image_id);
+    }
+}
+
+// Image View //
+impl Device {
+    pub fn create_image_view(
+        &self,
+        image_id: ImageID,
+        image_view_desc: &ImageViewDescription,
+    ) -> ImageViewID {
+        return self.inner.create_image_view(image_id, image_view_desc);
+    }
+
+    pub fn destroy_image_view(&self, image_view_id: ImageViewID) {
+        self.inner.destroy_image_view(image_view_id);
     }
 }
 
 // Pipeline Manager //
 impl Device {
-    pub fn create_pipeline_manager(&self) -> PipelineManager {
-        let (pool, set, layout) = self.inner.create_pipeline_manager_data();
+    pub fn create_pipeline_manager(&self, shader_directory: &str) -> PipelineManager {
+        let (pool, set, layout) = self.inner.create_pipeline_manager_data(shader_directory);
 
         return PipelineManager {
             inner: Arc::new(InnerPipelineManager {
+                shader_directory: shader_directory.to_string(),
                 desc_pool: pool,
                 desc_layout: layout,
                 desc_set: set,
