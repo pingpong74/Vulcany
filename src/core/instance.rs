@@ -10,6 +10,7 @@ use super::{
     device::Device,
 };
 
+use ash::vk::{Handle, PhysicalDeviceHostQueryResetFeatures};
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 
 #[derive(Clone)]
@@ -29,6 +30,10 @@ impl Instance {
 
     pub fn create_device(&self, device_desc: &DeviceDescription) -> Device {
         let (device, physical_device, allocator) = self.inner.create_device_data(device_desc);
+        let (graphics_pool, transfer_pool, compute_pool) =
+            InnerInstance::create_commands_pools(&device, &physical_device);
+        let (graphics_queue, transfer_queue, compute_queue) =
+            InnerInstance::create_queues(&device, &physical_device);
 
         return Device {
             inner: Arc::new(InnerDevice {
@@ -42,6 +47,16 @@ impl Instance {
                 image_pool: RwLock::new(GpuResourcePool::new()),
                 image_view_pool: RwLock::new(GpuResourcePool::new()),
                 sampler_pool: RwLock::new(GpuResourcePool::new()),
+
+                //Command pools
+                graphics_cmd_pool: graphics_pool,
+                compute_cmd_pool: compute_pool,
+                transfer_cmd_pool: transfer_pool,
+
+                //Queues
+                graphics_queue: graphics_queue,
+                transfer_queue: transfer_queue,
+                compute_queue: compute_queue,
             }),
         };
     }

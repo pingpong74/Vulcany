@@ -1,4 +1,4 @@
-use vulcany::taskgraph::task_graph::*;
+use smallvec::smallvec;
 use vulcany::*;
 use winit::{event_loop::EventLoop, window::Window};
 
@@ -9,8 +9,6 @@ vertex!(MyVertex {
     pos: [f32; 3] => { location: 0, format: R32G32_SFLOAT },
     color: [f32; 3] => { location: 1, format: R32G32B32_SFLOAT },
 });
-
-fn test_task(_cmd: &mut CommandBuffer, _read: ReadResources, _write: WriteResources) {}
 
 fn main() {
     let event_loop: EventLoop<()> = EventLoop::with_user_event()
@@ -28,7 +26,7 @@ fn main() {
     let size = window.inner_size();
 
     let instance = Instance::new(&InstanceDescription {
-        api_version: ApiVersion::VK_API_1_2,
+        api_version: ApiVersion::VkApi1_3,
         enable_validation_layers: true,
         window: window.clone(),
     });
@@ -38,103 +36,47 @@ fn main() {
         use_transfer_queue: true,
     });
 
-    let buffer_id = device.create_buffer(&BufferDescription {
-        usage: BufferUsage::VERTEX,
+    let src_buffer_id = device.create_buffer(&BufferDescription {
+        usage: BufferUsage::TransferSrc,
         size: 1000,
-        ..Default::default()
+        memory_type: MemoryType::PreferHost,
+        create_mapped: true,
     });
 
-    device.destroy_buffer(buffer_id);
-
-    let image_id = device.create_image(&ImageDescription::default());
-
-    let image_view_id = device.create_image_view(image_id, &ImageViewDescription::default());
-
-    device.destroy_image_view(image_view_id);
-    device.destroy_image(image_id);
-
-    let swapchain = device.create_swapchain(&SwapchainDescription {
-        image_count: 3,
-        width: size.width,
-        height: size.height,
+    let dst_buffer_id = device.create_buffer(&BufferDescription {
+        usage: BufferUsage::TransferDst,
+        size: 1000,
+        memory_type: MemoryType::PreferHost,
+        create_mapped: false,
     });
 
-    let pipeline_manager = device.create_pipeline_manager("examples/shaders");
+    let data = [1, 2, 3, 4, 5];
 
-    pipeline_manager.create_rasterization_pipeline(&RasterizationPipelineDescription {
-        vertex_input: MyVertex::vertex_input_description(),
-        vertex_shader_path: "vertex_shader.slang",
-        fragment_shader_path: "fragment_shader.slang",
-        cull_mode: CullMode::Back,
-        front_face: FrontFace::CounterClockwise,
-        polygon_mode: PolygonMode::Fill,
-        line_width: 0.5,
-        depth_stencil: DepthStencilOptions::default(),
-        alpha_blend_enable: true,
-        outputs: PipelineOutputs {
-            color: vec![ImageFormat::B8G8R8A8_UNORM],
-            depth: None,
-            stencil: None,
-        },
+    device.write_data_to_buffer(src_buffer_id, &data);
+
+    let cmd_buffer =
+        device.allocate_command_buffer(CommandBufferLevel::Primary, QueueType::Transfer);
+
+    cmd_buffer.begin_recording(CommandBufferUsage::OneTimeSubmit);
+    cmd_buffer.copy_buffer(&BufferCopyInfo {
+        src_buffer: src_buffer_id,
+        dst_buffer: dst_buffer_id,
+        src_offset: 0,
+        dst_offset: 0,
+        size: (data.len() * 32) as u64,
+    });
+    cmd_buffer.end_recording();
+
+    device.submit(&QueueSubmitInfo {
+        command_buffer_type: QueueType::Transfer,
+        fence: None,
+        command_buffers: smallvec![cmd_buffer],
+        wait_semaphores: smallvec![],
+        signal_semaphores: smallvec![],
     });
 
-    let mut task_graph = TaskGraph::new(device.clone(), swapchain.clone());
+    device.wait_queue(QueueType::Transfer);
 
-    task_graph.add_pass(Pass {
-        name: "Test 0",
-        pass_type: PassType::Graphic,
-        read_resources: ReadResources {
-            images: vec![image_id],
-            buffers: vec![buffer_id],
-        },
-        write_resources: WriteResources {
-            images: vec![],
-            buffers: vec![buffer_id],
-        },
-        record: test_task,
-    });
-
-    task_graph.add_pass(Pass {
-        name: "Test 1",
-        pass_type: PassType::Graphic,
-        read_resources: ReadResources {
-            images: vec![],
-            buffers: vec![buffer_id],
-        },
-        write_resources: WriteResources {
-            images: vec![],
-            buffers: vec![buffer_id],
-        },
-        record: test_task,
-    });
-
-    task_graph.add_pass(Pass {
-        name: "Test 2",
-        pass_type: PassType::Graphic,
-        read_resources: ReadResources {
-            images: vec![image_id],
-            buffers: vec![],
-        },
-        write_resources: WriteResources {
-            images: vec![image_id],
-            buffers: vec![],
-        },
-        record: test_task,
-    });
-
-    task_graph.add_pass(Pass {
-        name: "Test 3",
-        pass_type: PassType::Graphic,
-        read_resources: ReadResources {
-            images: vec![image_id],
-            buffers: vec![buffer_id],
-        },
-        write_resources: WriteResources {
-            images: vec![image_id],
-            buffers: vec![buffer_id],
-        },
-        record: test_task,
-    });
-
-    task_graph.compile();
+    device.destroy_buffer(src_buffer_id);
+    device.destroy_buffer(dst_buffer_id);
 }

@@ -28,8 +28,10 @@ impl PipelineManager {
     pub fn create_compute_pipeline() {}
 }
 
+pub trait Pipeline {}
+
 pub struct RasterizationPipeline {
-    inner: Arc<InnerRasterizationPipeline>,
+    pub(crate) inner: Arc<InnerRasterizationPipeline>,
 }
 
 pub struct ComputePipeline {}

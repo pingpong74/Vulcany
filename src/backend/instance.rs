@@ -3,7 +3,8 @@ use crate::{
     core::{definations::DeviceDescription, definations::InstanceDescription},
 };
 
-use ash::vk;
+use ash::vk::{self, Handle};
+use image::imageops::FilterType::Triangle;
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle, RawDisplayHandle, RawWindowHandle};
 use std::{ffi::CStr, sync::Arc};
 use vk_mem::AllocatorCreateInfo;
@@ -166,6 +167,8 @@ impl InnerInstance {
             let mut v = vec![
                 physical_device.queue_families.graphics_family.unwrap(),
                 physical_device.queue_families.presetation_family.unwrap(),
+                physical_device.queue_families.transfer_family.unwrap(),
+                physical_device.queue_families.compute_family.unwrap(),
             ];
             v.sort();
             v.dedup();
@@ -184,7 +187,10 @@ impl InnerInstance {
             .collect();
 
         // Required device extensions (swapchain needed for presentation)
-        let device_extensions = vec![ash::khr::swapchain::NAME.as_ptr()];
+        let device_extensions = vec![
+            ash::khr::swapchain::NAME.as_ptr(),
+            ash::khr::synchronization2::NAME.as_ptr(),
+        ];
 
         let features = vk::PhysicalDeviceFeatures::default();
 
@@ -203,9 +209,13 @@ impl InnerInstance {
             .descriptor_binding_uniform_buffer_update_after_bind(true)
             .descriptor_binding_uniform_texel_buffer_update_after_bind(true);
 
+        let mut sync2 =
+            vk::PhysicalDeviceSynchronization2Features::default().synchronization2(true);
+
         let mut features2 = vk::PhysicalDeviceFeatures2::default()
             .push_next(&mut indexing_features)
             .push_next(&mut dynamic_rendering_features)
+            .push_next(&mut sync2)
             .features(features);
 
         let create_info = vk::DeviceCreateInfo::default()
@@ -227,7 +237,59 @@ impl InnerInstance {
             vk_mem::Allocator::new(allocator_create_info).expect("Failed to create vma allocator")
         };
 
+        unsafe {
+            let transfer =
+                dev.get_device_queue(physical_device.queue_families.transfer_family.unwrap(), 0);
+        }
+
         return (dev, physical_device, allocator);
+    }
+
+    pub(crate) fn create_commands_pools(
+        device: &ash::Device,
+        physical_device: &PhysicalDevice,
+    ) -> (vk::CommandPool, vk::CommandPool, vk::CommandPool) {
+        let pool_create_info = vk::CommandPoolCreateInfo::default()
+            .queue_family_index(physical_device.queue_families.graphics_family.unwrap());
+
+        let graphics_pool = unsafe {
+            device
+                .create_command_pool(&pool_create_info, None)
+                .expect("Failed to create command pool")
+        };
+
+        let pool_create_info = pool_create_info
+            .queue_family_index(physical_device.queue_families.transfer_family.unwrap());
+
+        let transfer_pool = unsafe {
+            device
+                .create_command_pool(&pool_create_info, None)
+                .expect("Failed to create command pool")
+        };
+
+        let pool_create_info = pool_create_info
+            .queue_family_index(physical_device.queue_families.compute_family.unwrap());
+
+        let compute_pool = unsafe {
+            device
+                .create_command_pool(&pool_create_info, None)
+                .expect("Failed to create command pool")
+        };
+
+        return (graphics_pool, transfer_pool, compute_pool);
+    }
+
+    pub(crate) fn create_queues(
+        device: &ash::Device,
+        physical_device: &PhysicalDevice,
+    ) -> (vk::Queue, vk::Queue, vk::Queue) {
+        return unsafe {
+            (
+                device.get_device_queue(physical_device.queue_families.graphics_family.unwrap(), 0),
+                device.get_device_queue(physical_device.queue_families.transfer_family.unwrap(), 0),
+                device.get_device_queue(physical_device.queue_families.compute_family.unwrap(), 0),
+            )
+        };
     }
 }
 

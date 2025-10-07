@@ -1,4 +1,12 @@
-use crate::{BufferID, CommandBuffer, Device, ImageID, Swapchain};
+use crate::{
+    BufferID, CommandBuffer, Device, ImageID, ImageViewID, SamplerID, Swapchain,
+    backend::{device::InnerDevice, swapchain::InnerSwapchain},
+    taskgraph::commands::TaskGraphRecordingInterface,
+};
+
+use ash::vk;
+
+use std::sync::Arc;
 
 pub enum PassType {
     Graphic,
@@ -6,42 +14,81 @@ pub enum PassType {
     Transfer,
 }
 
-pub struct ReadResources {
-    pub images: Vec<ImageID>,
-    pub buffers: Vec<BufferID>,
+#[derive(PartialEq, Clone, Copy)]
+pub enum ResourceAcess {
+    Write,
+    Read,
+    ReadAndWrite,
 }
 
-pub struct WriteResources {
-    pub images: Vec<ImageID>,
-    pub buffers: Vec<BufferID>,
+pub struct PassResource {
+    pub buffer: Option<BufferID>,
+    pub image: Option<ImageID>,
+    pub image_view: Option<ImageViewID>,
+    pub sampler: Option<SamplerID>,
+    pub acess: ResourceAcess,
+}
+
+impl Default for PassResource {
+    fn default() -> Self {
+        return PassResource {
+            buffer: None,
+            image: None,
+            image_view: None,
+            sampler: None,
+            acess: ResourceAcess::Write,
+        };
+    }
 }
 
 pub struct Pass {
     pub name: &'static str,
     pub pass_type: PassType,
-    pub read_resources: ReadResources,
-    pub write_resources: WriteResources,
-    pub record: fn(&mut CommandBuffer, ReadResources, WriteResources),
+    pub resources: Vec<PassResource>,
+    pub record: fn(&mut CommandBuffer, &Vec<PassResource>),
 }
 
 pub struct TaskGraph {
-    device: Device,
-    swapchain: Swapchain,
+    device: Arc<InnerDevice>,
+    swapchain: Arc<InnerSwapchain>,
+    recoders: Vec<TaskGraphRecordingInterface>,
     passes: Vec<Pass>,
     edges: Vec<Vec<usize>>,
 }
 
 impl TaskGraph {
     pub fn new(device: Device, swapchain: Swapchain) -> TaskGraph {
-        return TaskGraph {
-            device: device,
-            swapchain: swapchain,
+        let mut tg = TaskGraph {
+            device: device.inner.clone(),
+            swapchain: swapchain.inner.clone(),
+            recoders: Vec::new(),
             passes: Vec::new(),
             edges: Vec::new(),
         };
+
+        tg.create_recording_interfaces();
+
+        return tg;
     }
 
-    pub fn accquire_image() {}
+    pub fn accquire_image(&self) -> (ImageID, ImageViewID) {
+        let (index, _) = unsafe {
+            self.swapchain
+                .swapchain_loader
+                .acquire_next_image(
+                    self.swapchain.handle,
+                    u64::max_value(),
+                    vk::Semaphore::null(),
+                    vk::Fence::null(),
+                )
+                .expect("Failed to accquire image")
+        };
+
+        return (
+            self.swapchain.images[index as usize],
+            self.swapchain.image_views[index as usize],
+        );
+    }
 
     pub fn add_pass(&mut self, pass: Pass) {
         self.passes.push(pass);
@@ -71,45 +118,29 @@ impl TaskGraph {
 
     //Checks if b has a dependency on a
     fn check_dependencies(a: &Pass, b: &Pass) -> bool {
-        // Write(A) → Read(B)
-        if a.write_resources
-            .images
-            .iter()
-            .any(|id| b.read_resources.images.contains(id))
-            || a.write_resources
-                .buffers
-                .iter()
-                .any(|id| b.read_resources.buffers.contains(id))
-        {
-            return true;
-        }
+        for res_a in &a.resources {
+            for res_b in &b.resources {
+                let same_resource = {
+                    res_a.buffer.is_some() && res_a.buffer == res_b.buffer
+                        || res_a.image.is_some() && res_a.image == res_b.image
+                        || res_a.image_view.is_some() && res_a.image_view == res_b.image_view
+                        || res_a.sampler.is_some() && res_a.sampler == res_b.sampler
+                };
 
-        // Write(A) → Write(B)
-        if a.write_resources
-            .images
-            .iter()
-            .any(|id| b.write_resources.images.contains(id))
-            || a.write_resources
-                .buffers
-                .iter()
-                .any(|id| b.write_resources.buffers.contains(id))
-        {
-            return true;
-        }
+                if same_resource {
+                    match (res_a.acess, res_b.acess) {
+                        // a writes, b writes
+                        (ResourceAcess::Write, ResourceAcess::Write)
+                        | (ResourceAcess::ReadAndWrite, _)
+                        | (_, ResourceAcess::ReadAndWrite)
+                        | (ResourceAcess::Write, ResourceAcess::Read)
+                        | (ResourceAcess::Read, ResourceAcess::Write) => return true,
 
-        // Read(A) → Write(B)
-        if a.read_resources
-            .images
-            .iter()
-            .any(|id| b.write_resources.images.contains(id))
-            || a.read_resources
-                .buffers
-                .iter()
-                .any(|id| b.write_resources.buffers.contains(id))
-        {
-            return true;
+                        _ => {}
+                    }
+                }
+            }
         }
-
         false
     }
 
@@ -209,5 +240,61 @@ impl TaskGraph {
         batches.reverse();
 
         return batches;
+    }
+
+    fn create_recording_interfaces(&mut self) {
+        let queue_families = &self.device.physical_device.queue_families;
+        let queue_indices = [
+            queue_families.presetation_family.clone().unwrap(),
+            queue_families.graphics_family.clone().unwrap(),
+            queue_families.transfer_family.clone().unwrap(),
+            queue_families.compute_family.clone().unwrap(),
+        ];
+
+        for queue_family_index in queue_indices {
+            let cmd_pool_create_info =
+                vk::CommandPoolCreateInfo::default().queue_family_index(queue_family_index);
+
+            let cmd_pool = unsafe {
+                self.device
+                    .handle
+                    .create_command_pool(&cmd_pool_create_info, None)
+                    .expect("Failed to create command pool")
+            };
+
+            let cmd_alloc_info = vk::CommandBufferAllocateInfo::default()
+                .command_buffer_count(1)
+                .command_pool(cmd_pool)
+                .level(vk::CommandBufferLevel::PRIMARY);
+
+            let cmd_buffer = unsafe {
+                self.device
+                    .handle
+                    .allocate_command_buffers(&cmd_alloc_info)
+                    .expect("Failed to allocate command buffer")
+            }[0];
+
+            let queue = unsafe { self.device.handle.get_device_queue(queue_family_index, 0) };
+
+            self.recoders.push(TaskGraphRecordingInterface {
+                command_pool: cmd_pool,
+                command_buffers: vec![cmd_buffer],
+                queue_index: queue_family_index,
+                queue: queue,
+                device: self.device.clone(),
+            });
+        }
+    }
+}
+
+impl Drop for TaskGraph {
+    fn drop(&mut self) {
+        for cmd_pool in &self.recoders {
+            unsafe {
+                self.device
+                    .handle
+                    .destroy_command_pool(cmd_pool.command_pool, None);
+            }
+        }
     }
 }

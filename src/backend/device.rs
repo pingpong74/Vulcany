@@ -1,6 +1,7 @@
 use crate::{
-    BufferDescription, BufferID, ImageDescription, ImageID, ImageViewDescription, ImageViewID,
-    SamplerDescription, SamplerID, SwapchainDescription,
+    BufferDescription, BufferID, CommandBufferLevel, ImageDescription, ImageID,
+    ImageViewDescription, ImageViewID, QueueSubmitInfo, QueueType, SamplerDescription, SamplerID,
+    SwapchainDescription,
     backend::{
         gpu_resources::{BufferSlot, GpuResourcePool, ImageSlot, ImageViewSlot, SamplerSlot},
         instance::InnerInstance,
@@ -9,8 +10,11 @@ use crate::{
 };
 
 use super::instance::PhysicalDevice;
-use ash::vk;
-use std::sync::{Arc, RwLock};
+use ash::vk::{self, Handle};
+use std::{
+    ptr::{null, null_mut},
+    sync::{Arc, RwLock},
+};
 use vk_mem::*;
 
 pub(crate) struct InnerDevice {
@@ -24,6 +28,16 @@ pub(crate) struct InnerDevice {
     pub(crate) image_pool: RwLock<GpuResourcePool<ImageSlot>>,
     pub(crate) image_view_pool: RwLock<GpuResourcePool<ImageViewSlot>>,
     pub(crate) sampler_pool: RwLock<GpuResourcePool<SamplerSlot>>,
+
+    //Command pools
+    pub(crate) graphics_cmd_pool: vk::CommandPool,
+    pub(crate) transfer_cmd_pool: vk::CommandPool,
+    pub(crate) compute_cmd_pool: vk::CommandPool,
+
+    //Queues
+    pub(crate) graphics_queue: vk::Queue,
+    pub(crate) transfer_queue: vk::Queue,
+    pub(crate) compute_queue: vk::Queue,
 }
 
 // Swapchain Creation //
@@ -74,8 +88,8 @@ impl InnerDevice {
     ) -> (
         ash::khr::swapchain::Device,
         vk::SwapchainKHR,
-        Vec<vk::Image>,
-        Vec<vk::ImageView>,
+        Vec<ImageID>,
+        Vec<ImageViewID>,
     ) {
         let swapchain_loader =
             ash::khr::swapchain::Device::new(&self.instance.handle, &self.handle);
@@ -138,37 +152,40 @@ impl InnerDevice {
                 .expect("Failed to get swapchain images")
         };
 
-        let image_views: Vec<vk::ImageView> = images
+        let image_ids: Vec<ImageID> = images
             .iter()
             .map(|&image| {
-                let create_info = vk::ImageViewCreateInfo::default()
-                    .image(image)
-                    .view_type(vk::ImageViewType::TYPE_2D)
-                    .format(surface_format.format)
-                    .components(vk::ComponentMapping {
-                        r: vk::ComponentSwizzle::IDENTITY,
-                        g: vk::ComponentSwizzle::IDENTITY,
-                        b: vk::ComponentSwizzle::IDENTITY,
-                        a: vk::ComponentSwizzle::IDENTITY,
-                    })
-                    .subresource_range(
-                        vk::ImageSubresourceRange::default()
-                            .aspect_mask(vk::ImageAspectFlags::COLOR)
-                            .base_mip_level(0)
-                            .level_count(1)
-                            .base_array_layer(0)
-                            .layer_count(1),
-                    );
+                let id = self.image_pool.write().unwrap().add(ImageSlot {
+                    handle: image,
+                    allocation: vk_mem::Allocation(std::ptr::null_mut()),
+                    alloc_info: vk_mem::AllocationInfo {
+                        memory_type: 0,
+                        device_memory: vk::DeviceMemory::null(),
+                        user_data: 0,
+                        mapped_data: null_mut(),
+                        offset: 0,
+                        size: 0,
+                    },
+                    format: surface_format.format,
+                });
 
-                unsafe {
-                    self.handle
-                        .create_image_view(&create_info, None)
-                        .expect("Failed to create swapchain image view")
-                }
+                ImageID { id: id }
             })
             .collect();
 
-        return (swapchain_loader, swapchain, images, image_views);
+        let image_views: Vec<ImageViewID> = image_ids
+            .iter()
+            .map(|&image_id| {
+                let create_info = crate::ImageViewDescription {
+                    view_type: crate::ImageViewType::Type2D,
+                    ..Default::default()
+                };
+
+                self.create_image_view(image_id, &create_info)
+            })
+            .collect();
+
+        return (swapchain_loader, swapchain, image_ids, image_views);
     }
 }
 
@@ -179,15 +196,20 @@ impl InnerDevice {
             .usage(buffer_desc.usage.to_vk_flag())
             .size(buffer_desc.size);
 
-        let allocation_create_info = vk_mem::AllocationCreateInfo {
+        let mut allocation_create_info = vk_mem::AllocationCreateInfo {
             usage: buffer_desc.memory_type.to_vk_flag(),
             ..Default::default()
         };
 
+        if buffer_desc.create_mapped {
+            allocation_create_info.flags =
+                AllocationCreateFlags::MAPPED | AllocationCreateFlags::HOST_ACCESS_SEQUENTIAL_WRITE;
+        }
+
         let (buffer, allocation) = unsafe {
             self.allocator
                 .create_buffer(&buffer_create_info, &allocation_create_info)
-                .expect("Failed to create buffer ")
+                .expect("Failed to create buffer")
         };
 
         let alloc_info = self.allocator.get_allocation_info(&allocation);
@@ -207,6 +229,16 @@ impl InnerDevice {
         unsafe {
             self.allocator
                 .destroy_buffer(res.handle, &mut res.allocation);
+        }
+    }
+
+    pub(crate) fn write_data_to_buffer<T: Copy>(&self, buffer_id: BufferID, data: &[T]) {
+        let buffer_pool = self.buffer_pool.read().unwrap();
+        let buffer = buffer_pool.get_ref(buffer_id.id);
+
+        unsafe {
+            let ptr = buffer.alloc_info.mapped_data as *mut T;
+            std::ptr::copy_nonoverlapping(data.as_ptr(), ptr, data.len());
         }
     }
 }
@@ -473,9 +505,161 @@ impl InnerDevice {
     }
 }
 
+//// Command buffers ////
+impl InnerDevice {
+    pub(crate) fn allocate_command_buffers(
+        &self,
+        level: CommandBufferLevel,
+        cmd_type: QueueType,
+    ) -> vk::CommandBuffer {
+        let allocate_info = vk::CommandBufferAllocateInfo::default()
+            .command_buffer_count(1)
+            .command_pool(match cmd_type {
+                QueueType::Graphics => self.graphics_cmd_pool,
+                QueueType::Transfer => self.transfer_cmd_pool,
+                QueueType::Compute => self.compute_cmd_pool,
+            })
+            .level(level.to_vk_flags());
+
+        return unsafe {
+            self.handle
+                .allocate_command_buffers(&allocate_info)
+                .expect("Failed to allocate command buffers")
+        }[0];
+    }
+}
+
+//// Sync ////
+impl InnerDevice {
+    pub(crate) fn create_fence(&self, signaled: bool) -> vk::Fence {
+        let create_info = vk::FenceCreateInfo::default().flags(if signaled {
+            vk::FenceCreateFlags::SIGNALED
+        } else {
+            vk::FenceCreateFlags::empty()
+        });
+
+        return unsafe {
+            self.handle
+                .create_fence(&create_info, None)
+                .expect("Failed to create Fence")
+        };
+    }
+
+    pub(crate) fn create_binary_semaphore(&self) -> vk::Semaphore {
+        let create_info =
+            vk::SemaphoreCreateInfo::default().flags(vk::SemaphoreCreateFlags::empty());
+
+        return unsafe {
+            self.handle
+                .create_semaphore(&create_info, None)
+                .expect("Failed to create semaphore")
+        };
+    }
+
+    pub(crate) fn create_timeline_semaphore(&self) -> vk::Semaphore {
+        let mut type_info = vk::SemaphoreTypeCreateInfo::default()
+            .semaphore_type(vk::SemaphoreType::TIMELINE)
+            .initial_value(0);
+
+        let create_info = vk::SemaphoreCreateInfo::default().push_next(&mut type_info);
+
+        return unsafe {
+            self.handle
+                .create_semaphore(&create_info, None)
+                .expect("Failed to create timeline semaphore")
+        };
+    }
+}
+
+//// Queue submission ////
+impl InnerDevice {
+    // We need to take an array as an input
+    pub(crate) fn submit(&self, submit_info: &QueueSubmitInfo) {
+        let signal_infos: Vec<vk::SemaphoreSubmitInfo> = submit_info
+            .signal_semaphores
+            .iter()
+            .map(|s| {
+                vk::SemaphoreSubmitInfo::default()
+                    .semaphore(s.semaphore.handle())
+                    .stage_mask(s.pipeline_stage.to_vk())
+                    .value(s.value.unwrap_or(0))
+            })
+            .collect();
+
+        let wait_infos: Vec<vk::SemaphoreSubmitInfo> = submit_info
+            .wait_semaphores
+            .iter()
+            .map(|s| {
+                vk::SemaphoreSubmitInfo::default()
+                    .semaphore(s.semaphore.handle())
+                    .stage_mask(s.pipeline_stage.to_vk())
+                    .value(s.value.unwrap_or(0))
+            })
+            .collect();
+
+        let cmd_infos: Vec<vk::CommandBufferSubmitInfo> = submit_info
+            .command_buffers
+            .iter()
+            .map(|cb| {
+                vk::CommandBufferSubmitInfo::default()
+                    .command_buffer(cb.handle)
+                    .device_mask(0)
+            })
+            .collect();
+
+        let submit = vk::SubmitInfo2::default()
+            .wait_semaphore_infos(wait_infos.as_slice())
+            .command_buffer_infos(cmd_infos.as_slice())
+            .signal_semaphore_infos(signal_infos.as_slice())
+            .flags(vk::SubmitFlags::empty());
+
+        let fence_handle = match &submit_info.fence {
+            Some(f) => f.handle,
+            None => vk::Fence::null(),
+        };
+
+        let queue = match submit_info.command_buffer_type {
+            QueueType::Graphics => self.graphics_queue,
+            QueueType::Compute => self.compute_queue,
+            QueueType::Transfer => self.transfer_queue,
+        };
+
+        unsafe {
+            self.handle
+                .queue_submit2(queue, &[submit], fence_handle)
+                .expect("Queue submit failed");
+        }
+    }
+
+    pub(crate) fn wait_idle(&self) {
+        unsafe {
+            self.handle.device_wait_idle();
+        }
+    }
+
+    pub(crate) fn wait_queue(&self, queue_type: QueueType) {
+        let queue = match queue_type {
+            QueueType::Graphics => self.graphics_queue,
+            QueueType::Compute => self.compute_queue,
+            QueueType::Transfer => self.transfer_queue,
+        };
+
+        unsafe {
+            self.handle.queue_wait_idle(queue);
+        }
+    }
+}
+
 impl Drop for InnerDevice {
     fn drop(&mut self) {
         unsafe {
+            self.handle
+                .destroy_command_pool(self.graphics_cmd_pool, None);
+            self.handle
+                .destroy_command_pool(self.transfer_cmd_pool, None);
+            self.handle
+                .destroy_command_pool(self.compute_cmd_pool, None);
+
             std::ptr::drop_in_place(&mut self.allocator);
             self.handle.destroy_device(None);
         }

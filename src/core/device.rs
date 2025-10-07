@@ -1,17 +1,12 @@
 use image::GenericImageView;
 
 use crate::{
-    BufferDescription, BufferID, ImageDescription, ImageID, ImageViewDescription, ImageViewID,
-    PipelineManager, SamplerDescription, SamplerID, Swapchain, SwapchainDescription,
+    BinarySemaphore, BufferDescription, BufferID, CommandBuffer, CommandBufferLevel, Fence,
+    ImageDescription, ImageID, ImageViewDescription, ImageViewID, PipelineManager, QueueSubmitInfo,
+    QueueType, SamplerDescription, SamplerID, Swapchain, SwapchainDescription, TimelineSemaphore,
     backend::{device::InnerDevice, pipelines::InnerPipelineManager, swapchain::InnerSwapchain},
 };
 use std::sync::Arc;
-
-//We need to swwitch to an ID system for buffers, images and other gpu resources now.
-//
-// Have a Gpu resource pool class which will handle all this stuff
-//
-// Have a create and destroy function for each resource, need to sacrifice RAII
 
 #[derive(Clone)]
 pub struct Device {
@@ -45,6 +40,8 @@ impl Device {
     pub fn destroy_buffer(&self, id: BufferID) {
         self.inner.destroy_buffer(id);
     }
+
+    pub fn write_data_to_buffer<T: Copy>(&self, buffer_id: BufferID, data: &[T]) {}
 }
 
 // Image //
@@ -87,5 +84,58 @@ impl Device {
                 device: self.inner.clone(),
             }),
         };
+    }
+}
+
+// Command buffer //
+impl Device {
+    pub fn allocate_command_buffer(
+        &self,
+        level: CommandBufferLevel,
+        cmd_type: QueueType,
+    ) -> CommandBuffer {
+        return CommandBuffer {
+            handle: self.inner.allocate_command_buffers(level, cmd_type),
+            device: self.inner.clone(),
+        };
+    }
+}
+
+// Sync //
+impl Device {
+    pub fn create_fence(&self, signaled: bool) -> Fence {
+        return Fence {
+            handle: self.inner.create_fence(signaled),
+            device: self.inner.clone(),
+        };
+    }
+
+    pub fn create_binary_semphore(&self) -> BinarySemaphore {
+        return BinarySemaphore {
+            handle: self.inner.create_binary_semaphore(),
+            device: self.inner.clone(),
+        };
+    }
+
+    pub fn create_timeline_semaphore(&self) -> TimelineSemaphore {
+        return TimelineSemaphore {
+            handle: self.inner.create_timeline_semaphore(),
+            device: self.inner.clone(),
+        };
+    }
+}
+
+// Queue submissions
+impl Device {
+    pub fn submit(&self, submit_info: &QueueSubmitInfo) {
+        self.inner.submit(submit_info);
+    }
+
+    pub fn wait_idle(&self) {
+        self.inner.wait_idle();
+    }
+
+    pub fn wait_queue(&self, queue_type: QueueType) {
+        self.inner.wait_queue(queue_type);
     }
 }
