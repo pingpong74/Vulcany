@@ -1,3 +1,4 @@
+use image::codecs::hdr::SIGNATURE;
 use smallvec::smallvec;
 use vulcany::*;
 use winit::{event_loop::EventLoop, window::Window};
@@ -27,7 +28,7 @@ fn main() {
 
     let instance = Instance::new(&InstanceDescription {
         api_version: ApiVersion::VkApi1_3,
-        enable_validation_layers: true,
+        enable_validation_layers: false,
         window: window.clone(),
     });
 
@@ -36,47 +37,62 @@ fn main() {
         use_transfer_queue: true,
     });
 
-    let src_buffer_id = device.create_buffer(&BufferDescription {
-        usage: BufferUsage::TransferSrc,
-        size: 1000,
-        memory_type: MemoryType::PreferHost,
-        create_mapped: true,
+    let swapchain = device.create_swapchain(&SwapchainDescription {
+        image_count: 3,
+        width: size.width,
+        height: size.height,
     });
 
-    let dst_buffer_id = device.create_buffer(&BufferDescription {
-        usage: BufferUsage::TransferDst,
-        size: 1000,
-        memory_type: MemoryType::PreferHost,
-        create_mapped: false,
-    });
-
-    let data = [1, 2, 3, 4, 5];
-
-    device.write_data_to_buffer(src_buffer_id, &data);
+    let fence = device.create_fence(true);
+    let image_semaphore = device.create_binary_semaphore();
+    let render_finish_semaphore = device.create_binary_semaphore();
 
     let cmd_buffer =
-        device.allocate_command_buffer(CommandBufferLevel::Primary, QueueType::Transfer);
+        device.allocate_command_buffer(CommandBufferLevel::Primary, QueueType::Graphics);
+
+    device.reset_fence(fence);
+
+    let (_, img_view) = swapchain.acquire_image(Some(&image_semaphore), Some(&fence));
+
+    let color_attachment_info = RenderingAttachment {
+        image_view: img_view,
+        ..Default::default()
+    };
 
     cmd_buffer.begin_recording(CommandBufferUsage::OneTimeSubmit);
-    cmd_buffer.copy_buffer(&BufferCopyInfo {
-        src_buffer: src_buffer_id,
-        dst_buffer: dst_buffer_id,
-        src_offset: 0,
-        dst_offset: 0,
-        size: (data.len() * 32) as u64,
+    cmd_buffer.begin_rendering(&RenderingBeginInfo {
+        render_area: RenderArea {
+            offset: 0,
+            width: size.width,
+            height: size.height,
+        },
+        rendering_flags: RenderingFlags::None,
+        view_mask: 0,
+        layer_count: 1,
+        color_attachments: vec![color_attachment_info],
+        depth_attachment: None,
+        stencil_attachment: None,
     });
+    cmd_buffer.end_rendering();
     cmd_buffer.end_recording();
 
     device.submit(&QueueSubmitInfo {
-        command_buffer_type: QueueType::Transfer,
+        command_buffer_type: QueueType::Graphics,
         fence: None,
         command_buffers: smallvec![cmd_buffer],
-        wait_semaphores: smallvec![],
-        signal_semaphores: smallvec![],
+        wait_semaphores: smallvec![SemaphoreInfo {
+            semaphore: image_semaphore,
+            pipeline_stage: PipelineStage::AllCommands,
+            value: None
+        }],
+        signal_semaphores: smallvec![SemaphoreInfo {
+            semaphore: render_finish_semaphore,
+            pipeline_stage: PipelineStage::AllCommands,
+            value: None
+        }],
     });
 
-    device.wait_queue(QueueType::Transfer);
+    swapchain.preset(&render_finish_semaphore);
 
-    device.destroy_buffer(src_buffer_id);
-    device.destroy_buffer(dst_buffer_id);
+    device.wait_idle();
 }

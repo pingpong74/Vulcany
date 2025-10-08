@@ -42,9 +42,13 @@ impl CommandBuffer {
             let image_view = image_view_pool
                 .get_ref(color_attachement.image_view.id)
                 .handle;
-            let resolve_image_view = image_view_pool
-                .get_ref(color_attachement.resolve_image_view.id)
-                .handle;
+            let resolve_image_view = if color_attachement.resolve_image_view.is_some() {
+                image_view_pool
+                    .get_ref(color_attachement.resolve_image_view.unwrap().id)
+                    .handle
+            } else {
+                vk::ImageView::null()
+            };
 
             color_attachment_info.push(
                 vk::RenderingAttachmentInfo::default()
@@ -58,50 +62,66 @@ impl CommandBuffer {
             )
         }
 
-        // For depth
-        let depth_attachment = &rendering_begin_info.depth_attachment;
-
-        let image_view = image_view_pool
-            .get_ref(depth_attachment.image_view.id)
-            .handle;
-        let resolve_image_view = image_view_pool
-            .get_ref(depth_attachment.resolve_image_view.id)
-            .handle;
-
-        let depth_attachment_info = vk::RenderingAttachmentInfo::default()
-            .image_view(image_view)
-            .image_layout(depth_attachment.image_layout.to_vk_layout())
-            .resolve_image_view(resolve_image_view)
-            .resolve_image_layout(depth_attachment.resolve_image_layout.to_vk_layout())
-            .load_op(depth_attachment.load_op.to_vk())
-            .store_op(depth_attachment.store_op.to_vk())
-            .clear_value(depth_attachment.clear_value.to_vk());
-
-        // For stencil
-        let stencil_attachment = &rendering_begin_info.stencil_attachment;
-
-        let image_view = image_view_pool
-            .get_ref(stencil_attachment.image_view.id)
-            .handle;
-        let resolve_image_view = image_view_pool
-            .get_ref(stencil_attachment.resolve_image_view.id)
-            .handle;
-
-        let stencil_attachment_info = vk::RenderingAttachmentInfo::default()
-            .image_view(image_view)
-            .image_layout(stencil_attachment.image_layout.to_vk_layout())
-            .resolve_image_view(resolve_image_view)
-            .resolve_image_layout(stencil_attachment.resolve_image_layout.to_vk_layout())
-            .load_op(stencil_attachment.load_op.to_vk())
-            .store_op(stencil_attachment.store_op.to_vk())
-            .clear_value(stencil_attachment.clear_value.to_vk());
-
-        let rendering_info = vk::RenderingInfo::default()
+        let mut rendering_info = vk::RenderingInfo::default()
             .color_attachments(color_attachment_info.as_slice())
-            .depth_attachment(&depth_attachment_info)
-            .stencil_attachment(&stencil_attachment_info)
             .layer_count(rendering_begin_info.layer_count)
             .view_mask(rendering_begin_info.view_mask);
+
+        let mut depth_attachment_info: vk::RenderingAttachmentInfo;
+        let mut stencil_attachment_info: vk::RenderingAttachmentInfo;
+
+        // Adding the optinal depth and stencil attachment
+        if rendering_begin_info.depth_attachment.is_some() {
+            let depth_attachment = rendering_begin_info.depth_attachment.as_ref().unwrap();
+
+            let image_view = image_view_pool
+                .get_ref(depth_attachment.image_view.id)
+                .handle;
+            let resolve_image_view = if depth_attachment.resolve_image_view.is_some() {
+                image_view_pool
+                    .get_ref(depth_attachment.resolve_image_view.unwrap().id)
+                    .handle
+            } else {
+                vk::ImageView::null()
+            };
+
+            depth_attachment_info = vk::RenderingAttachmentInfo::default()
+                .image_view(image_view)
+                .image_layout(depth_attachment.image_layout.to_vk_layout())
+                .resolve_image_view(resolve_image_view)
+                .resolve_image_layout(depth_attachment.resolve_image_layout.to_vk_layout())
+                .load_op(depth_attachment.load_op.to_vk())
+                .store_op(depth_attachment.store_op.to_vk())
+                .clear_value(depth_attachment.clear_value.to_vk());
+
+            rendering_info = rendering_info.depth_attachment(&depth_attachment_info);
+        }
+
+        if rendering_begin_info.stencil_attachment.is_some() {
+            let stencil_attachment = &rendering_begin_info.stencil_attachment.as_ref().unwrap();
+
+            let image_view = image_view_pool
+                .get_ref(stencil_attachment.image_view.id)
+                .handle;
+            let resolve_image_view = if stencil_attachment.resolve_image_view.is_some() {
+                image_view_pool
+                    .get_ref(stencil_attachment.resolve_image_view.unwrap().id)
+                    .handle
+            } else {
+                vk::ImageView::null()
+            };
+
+            stencil_attachment_info = vk::RenderingAttachmentInfo::default()
+                .image_view(image_view)
+                .image_layout(stencil_attachment.image_layout.to_vk_layout())
+                .resolve_image_view(resolve_image_view)
+                .resolve_image_layout(stencil_attachment.resolve_image_layout.to_vk_layout())
+                .load_op(stencil_attachment.load_op.to_vk())
+                .store_op(stencil_attachment.store_op.to_vk())
+                .clear_value(stencil_attachment.clear_value.to_vk());
+
+            rendering_info = rendering_info.stencil_attachment(&stencil_attachment_info);
+        }
 
         unsafe {
             self.device
@@ -320,86 +340,22 @@ impl CommandBuffer {
     }
 }
 
+#[derive(Clone, Copy)]
 pub struct Fence {
     pub(crate) handle: vk::Fence,
-    pub(crate) device: Arc<InnerDevice>,
 }
 
-impl Fence {
-    pub fn wait(&self, timeout: u64) -> bool {
-        unsafe {
-            match self
-                .device
-                .handle
-                .wait_for_fences(&[self.handle], true, timeout)
-            {
-                Ok(_) => true,
-                Err(vk::Result::TIMEOUT) => false,
-                Err(err) => panic!("Fence wait failed: {:?}", err),
-            }
-        }
-    }
-
-    pub fn reset(&self) {
-        unsafe {
-            self.device
-                .handle
-                .reset_fences(&[self.handle])
-                .expect("Failed to reset fence");
-        }
-    }
-}
-
-impl Drop for Fence {
-    fn drop(&mut self) {
-        unsafe {
-            self.device.handle.destroy_fence(self.handle, None);
-        }
-    }
-}
-
+#[derive(Clone, Copy)]
 pub struct BinarySemaphore {
     pub(crate) handle: vk::Semaphore,
-    pub(crate) device: Arc<InnerDevice>,
 }
 
-impl Drop for BinarySemaphore {
-    fn drop(&mut self) {
-        unsafe {
-            self.device.handle.destroy_semaphore(self.handle, None);
-        }
-    }
-}
-
+#[derive(Clone, Copy)]
 pub struct TimelineSemaphore {
     pub(crate) handle: vk::Semaphore,
-    pub(crate) device: Arc<InnerDevice>,
 }
 
-impl TimelineSemaphore {
-    pub fn wait(&self, value: u64, timeout: u64) {
-        unsafe {
-            self.device
-                .handle
-                .wait_semaphores(
-                    &vk::SemaphoreWaitInfo::default()
-                        .semaphores(&[self.handle])
-                        .values(&[value]),
-                    timeout,
-                )
-                .expect("Failed to wait on timeline semaphore");
-        }
-    }
-}
-
-impl Drop for TimelineSemaphore {
-    fn drop(&mut self) {
-        unsafe {
-            self.device.handle.destroy_semaphore(self.handle, None);
-        }
-    }
-}
-
+#[derive(Clone, Copy)]
 pub enum Semaphore {
     Binary(BinarySemaphore),
     Timeline(TimelineSemaphore),

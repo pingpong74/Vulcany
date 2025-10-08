@@ -3,7 +3,8 @@ use image::GenericImageView;
 use crate::{
     BinarySemaphore, BufferDescription, BufferID, CommandBuffer, CommandBufferLevel, Fence,
     ImageDescription, ImageID, ImageViewDescription, ImageViewID, PipelineManager, QueueSubmitInfo,
-    QueueType, SamplerDescription, SamplerID, Swapchain, SwapchainDescription, TimelineSemaphore,
+    QueueType, SamplerDescription, SamplerID, Semaphore, Swapchain, SwapchainDescription,
+    TimelineSemaphore,
     backend::{device::InnerDevice, pipelines::InnerPipelineManager, swapchain::InnerSwapchain},
 };
 use std::sync::Arc;
@@ -23,6 +24,7 @@ impl Device {
             inner: Arc::new(InnerSwapchain {
                 handle: swapchain,
                 swapchain_loader: loader,
+                curr_img_index: 0,
                 image_views: image_views,
                 images: images,
                 device: self.inner.clone(),
@@ -106,22 +108,27 @@ impl Device {
     pub fn create_fence(&self, signaled: bool) -> Fence {
         return Fence {
             handle: self.inner.create_fence(signaled),
-            device: self.inner.clone(),
         };
     }
 
-    pub fn create_binary_semphore(&self) -> BinarySemaphore {
-        return BinarySemaphore {
+    pub fn create_binary_semaphore(&self) -> Semaphore {
+        return Semaphore::Binary(BinarySemaphore {
             handle: self.inner.create_binary_semaphore(),
-            device: self.inner.clone(),
-        };
+        });
     }
 
-    pub fn create_timeline_semaphore(&self) -> TimelineSemaphore {
-        return TimelineSemaphore {
+    pub fn create_timeline_semaphore(&self) -> Semaphore {
+        return Semaphore::Timeline(TimelineSemaphore {
             handle: self.inner.create_timeline_semaphore(),
-            device: self.inner.clone(),
-        };
+        });
+    }
+
+    pub fn wait_fence(&self, fence: Fence) {
+        self.inner.wait_fence(fence);
+    }
+
+    pub fn reset_fence(&self, fence: Fence) {
+        self.inner.reset_fence(fence);
     }
 }
 

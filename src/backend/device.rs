@@ -1,7 +1,7 @@
 use crate::{
-    BufferDescription, BufferID, CommandBufferLevel, ImageDescription, ImageID,
+    BufferDescription, BufferID, CommandBufferLevel, Fence, ImageDescription, ImageID,
     ImageViewDescription, ImageViewID, QueueSubmitInfo, QueueType, SamplerDescription, SamplerID,
-    SwapchainDescription,
+    Semaphore, SwapchainDescription,
     backend::{
         gpu_resources::{BufferSlot, GpuResourcePool, ImageSlot, ImageViewSlot, SamplerSlot},
         instance::InnerInstance,
@@ -568,6 +568,30 @@ impl InnerDevice {
                 .create_semaphore(&create_info, None)
                 .expect("Failed to create timeline semaphore")
         };
+    }
+
+    pub(crate) fn destroy_fence(&self, fence: Fence) {
+        unsafe {
+            self.handle.destroy_fence(fence.handle, None);
+        }
+    }
+
+    pub(crate) fn destroy_semaphore(&self, semaphore: Semaphore) {
+        unsafe {
+            self.handle.destroy_semaphore(semaphore.handle(), None);
+        }
+    }
+
+    pub(crate) fn wait_fence(&self, fence: Fence) {
+        unsafe {
+            self.handle.wait_for_fences(&[fence.handle], true, 1000);
+        }
+    }
+
+    pub(crate) fn reset_fence(&self, fence: Fence) {
+        unsafe {
+            self.handle.reset_fences(&[fence.handle]);
+        }
     }
 }
 

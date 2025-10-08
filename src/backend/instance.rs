@@ -99,8 +99,7 @@ impl InnerInstance {
         let mut debug_create_info = vk::DebugUtilsMessengerCreateInfoEXT::default()
             .message_severity(
                 vk::DebugUtilsMessageSeverityFlagsEXT::ERROR
-                    | vk::DebugUtilsMessageSeverityFlagsEXT::WARNING, //| vk::DebugUtilsMessageSeverityFlagsEXT::INFO
-                                                                      //| vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE,
+                    | vk::DebugUtilsMessageSeverityFlagsEXT::WARNING,
             )
             .message_type(
                 vk::DebugUtilsMessageTypeFlagsEXT::GENERAL
@@ -212,10 +211,14 @@ impl InnerInstance {
         let mut sync2 =
             vk::PhysicalDeviceSynchronization2Features::default().synchronization2(true);
 
+        let mut timeline_sem =
+            vk::PhysicalDeviceTimelineSemaphoreFeatures::default().timeline_semaphore(true);
+
         let mut features2 = vk::PhysicalDeviceFeatures2::default()
             .push_next(&mut indexing_features)
             .push_next(&mut dynamic_rendering_features)
             .push_next(&mut sync2)
+            .push_next(&mut timeline_sem)
             .features(features);
 
         let create_info = vk::DeviceCreateInfo::default()

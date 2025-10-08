@@ -9,7 +9,6 @@ use crate::{BufferID, CommandBuffer, Fence, ImageID, ImageViewID, Semaphore};
 #[repr(u32)]
 #[derive(Clone)]
 pub enum ApiVersion {
-    VkApi1_2 = ash::vk::API_VERSION_1_2,
     VkApi1_3 = ash::vk::API_VERSION_1_3,
 }
 
@@ -519,9 +518,9 @@ impl IndexType {
 // Render begin info
 #[derive(Clone, Copy)]
 pub struct RenderArea {
-    offset: u32,
-    width: u32,
-    height: u32,
+    pub offset: u32,
+    pub width: u32,
+    pub height: u32,
 }
 #[derive(Copy, Clone, PartialEq)]
 pub enum LoadOp {
@@ -633,11 +632,11 @@ impl ClearValue {
 pub struct RenderingAttachment {
     pub image_view: ImageViewID,
     pub image_layout: ImageLayout,
-    pub resolve_image_view: ImageViewID,
+    pub resolve_mode: ResolveMode,
+    pub resolve_image_view: Option<ImageViewID>,
     pub resolve_image_layout: ImageLayout,
     pub load_op: LoadOp,
     pub store_op: StoreOp,
-    pub resolve_mode: ResolveMode,
     pub clear_value: ClearValue,
 }
 
@@ -648,9 +647,7 @@ impl Default for RenderingAttachment {
                 id: u64::max_value(),
             },
             image_layout: ImageLayout::Undefined,
-            resolve_image_view: ImageViewID {
-                id: u64::max_value(),
-            },
+            resolve_image_view: None,
             resolve_image_layout: ImageLayout::Undefined,
             load_op: LoadOp::DontCare,
             store_op: StoreOp::DontCare,
@@ -688,8 +685,8 @@ pub struct RenderingBeginInfo {
     pub view_mask: u32,
     pub layer_count: u32,
     pub color_attachments: Vec<RenderingAttachment>,
-    pub depth_attachment: RenderingAttachment,
-    pub stencil_attachment: RenderingAttachment,
+    pub depth_attachment: Option<RenderingAttachment>,
+    pub stencil_attachment: Option<RenderingAttachment>,
 }
 
 impl Default for RenderingBeginInfo {
@@ -704,8 +701,8 @@ impl Default for RenderingBeginInfo {
             view_mask: 0,
             layer_count: 0,
             color_attachments: Vec::new(),
-            depth_attachment: RenderingAttachment::default(),
-            stencil_attachment: RenderingAttachment::default(),
+            depth_attachment: None,
+            stencil_attachment: None,
         };
     }
 }
