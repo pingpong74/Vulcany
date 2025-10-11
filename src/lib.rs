@@ -4,6 +4,7 @@ pub(crate) mod backend;
 
 pub mod core;
 pub mod taskgraph;
+pub mod utils;
 
 pub use core::{
     commands::*, definations::*, device::*, gpu_resources::*, instance::*, pipelines::*,

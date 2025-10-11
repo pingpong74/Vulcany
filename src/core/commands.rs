@@ -6,12 +6,13 @@ use smallvec::SmallVec;
 
 use crate::{
     Barrier, BufferCopyInfo, BufferID, CommandBufferLevel, CommandBufferUsage, IndexType,
-    RasterizationPipeline, RenderingBeginInfo, backend::device::InnerDevice,
+    QueueType, RasterizationPipeline, RenderingBeginInfo, backend::device::InnerDevice,
 };
-#[derive(Clone)]
 
+#[derive(Clone)]
 pub struct CommandBuffer {
     pub(crate) handle: vk::CommandBuffer,
+    pub(crate) queue_type: QueueType,
     pub(crate) device: Arc<InnerDevice>,
 }
 
@@ -65,7 +66,14 @@ impl CommandBuffer {
         let mut rendering_info = vk::RenderingInfo::default()
             .color_attachments(color_attachment_info.as_slice())
             .layer_count(rendering_begin_info.layer_count)
-            .view_mask(rendering_begin_info.view_mask);
+            .view_mask(rendering_begin_info.view_mask)
+            .render_area(vk::Rect2D {
+                extent: vk::Extent2D {
+                    width: rendering_begin_info.render_area.width,
+                    height: rendering_begin_info.render_area.height,
+                },
+                offset: vk::Offset2D { x: 0, y: 0 },
+            });
 
         let mut depth_attachment_info: vk::RenderingAttachmentInfo;
         let mut stencil_attachment_info: vk::RenderingAttachmentInfo;
@@ -137,6 +145,36 @@ impl CommandBuffer {
     }
 
     //// Bind Commands ////
+
+    pub fn set_viewport_and_scissor(&self, width: u32, height: u32) {
+        unsafe {
+            self.device.handle.cmd_set_viewport(
+                self.handle,
+                0,
+                &[vk::Viewport {
+                    x: 0.0,
+                    y: 0.0,
+                    width: width as f32,
+                    height: height as f32,
+                    max_depth: 1.0,
+                    min_depth: 0.0,
+                }],
+            );
+
+            self.device.handle.cmd_set_scissor(
+                self.handle,
+                0,
+                &[vk::Rect2D {
+                    offset: vk::Offset2D { x: 0, y: 0 },
+                    extent: vk::Extent2D {
+                        width: width,
+                        height: height,
+                    },
+                }],
+            );
+        }
+    }
+
     pub fn bind_rasterization_pipeline(&self, pipeline: &RasterizationPipeline) {
         unsafe {
             self.device.handle.cmd_bind_pipeline(

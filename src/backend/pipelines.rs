@@ -231,7 +231,7 @@ impl InnerPipelineManager {
             .cull_mode(raster_pipeline_desc.cull_mode.to_vk_flag())
             .front_face(raster_pipeline_desc.front_face.to_vk_flag())
             .depth_bias_enable(false)
-            .line_width(raster_pipeline_desc.line_width);
+            .line_width(1.0);
 
         let multisampling = vk::PipelineMultisampleStateCreateInfo::default()
             .rasterization_samples(vk::SampleCountFlags::TYPE_1)
@@ -240,7 +240,7 @@ impl InnerPipelineManager {
         let depth_stencil = vk::PipelineDepthStencilStateCreateInfo::default()
             .depth_test_enable(raster_pipeline_desc.depth_stencil.depth_test_enable)
             .depth_write_enable(raster_pipeline_desc.depth_stencil.depth_write_enable)
-            .depth_compare_op(raster_pipeline_desc.depth_stencil.depth_compare_op)
+            .depth_compare_op(raster_pipeline_desc.depth_stencil.depth_compare_op.to_vk())
             .depth_bounds_test_enable(false)
             .stencil_test_enable(raster_pipeline_desc.depth_stencil.stencil_test_enable);
 
@@ -338,6 +338,11 @@ impl InnerPipelineManager {
                 .create_graphics_pipelines(vk::PipelineCache::null(), &[pipeline_info], None)
                 .expect("Failed to create graphics pipeline")[0]
         };
+
+        unsafe {
+            self.device.handle.destroy_shader_module(vert_module, None);
+            self.device.handle.destroy_shader_module(frag_module, None);
+        }
 
         return (pipeline, pipeline_layout);
     }

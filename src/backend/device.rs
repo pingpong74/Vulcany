@@ -1,7 +1,7 @@
 use crate::{
-    BufferDescription, BufferID, CommandBufferLevel, Fence, ImageDescription, ImageID,
-    ImageViewDescription, ImageViewID, QueueSubmitInfo, QueueType, SamplerDescription, SamplerID,
-    Semaphore, SwapchainDescription,
+    BufferDescription, BufferID, CommandBuffer, CommandBufferLevel, Fence, ImageDescription,
+    ImageID, ImageViewDescription, ImageViewID, QueueSubmitInfo, QueueType, SamplerDescription,
+    SamplerID, Semaphore, SwapchainDescription,
     backend::{
         gpu_resources::{BufferSlot, GpuResourcePool, ImageSlot, ImageViewSlot, SamplerSlot},
         instance::InnerInstance,
@@ -47,7 +47,7 @@ impl InnerDevice {
             .iter()
             .cloned()
             .find(|f| {
-                f.format == vk::Format::B8G8R8A8_SRGB
+                f.format == vk::Format::R16G16B16A16_SFLOAT
                     && f.color_space == vk::ColorSpaceKHR::SRGB_NONLINEAR
             })
             .unwrap_or_else(|| available_formats[0])
@@ -85,6 +85,7 @@ impl InnerDevice {
     pub(crate) fn create_swapchain_data(
         &self,
         swapchain_description: &SwapchainDescription,
+        old_swapchain: vk::SwapchainKHR,
     ) -> (
         ash::khr::swapchain::Device,
         vk::SwapchainKHR,
@@ -138,7 +139,8 @@ impl InnerDevice {
             .pre_transform(support.capabilities.current_transform)
             .composite_alpha(vk::CompositeAlphaFlagsKHR::OPAQUE)
             .present_mode(present_mode)
-            .clipped(true);
+            .clipped(true)
+            .old_swapchain(old_swapchain);
 
         let swapchain = unsafe {
             swapchain_loader
@@ -175,14 +177,7 @@ impl InnerDevice {
 
         let image_views: Vec<ImageViewID> = image_ids
             .iter()
-            .map(|&image_id| {
-                let create_info = crate::ImageViewDescription {
-                    view_type: crate::ImageViewType::Type2D,
-                    ..Default::default()
-                };
-
-                self.create_image_view(image_id, &create_info)
-            })
+            .map(|&image_id| self.create_image_view(image_id, &ImageViewDescription::default()))
             .collect();
 
         return (swapchain_loader, swapchain, image_ids, image_views);
@@ -527,6 +522,32 @@ impl InnerDevice {
                 .expect("Failed to allocate command buffers")
         }[0];
     }
+
+    pub(crate) fn free_command_buffer(&self, cmd_buffer: CommandBuffer) {
+        let command_pool = match cmd_buffer.queue_type {
+            QueueType::Graphics => self.graphics_cmd_pool,
+            QueueType::Compute => self.compute_cmd_pool,
+            QueueType::Transfer => self.transfer_cmd_pool,
+        };
+
+        unsafe {
+            self.handle
+                .free_command_buffers(command_pool, &[cmd_buffer.handle]);
+        }
+    }
+
+    pub(crate) fn reset_command_pool(&self, queue_type: QueueType) {
+        let command_pool = match queue_type {
+            QueueType::Compute => self.compute_cmd_pool,
+            QueueType::Transfer => self.transfer_cmd_pool,
+            QueueType::Graphics => self.graphics_cmd_pool,
+        };
+
+        unsafe {
+            self.handle
+                .reset_command_pool(command_pool, vk::CommandPoolResetFlags::empty());
+        }
+    }
 }
 
 //// Sync ////
@@ -584,7 +605,7 @@ impl InnerDevice {
 
     pub(crate) fn wait_fence(&self, fence: Fence) {
         unsafe {
-            self.handle.wait_for_fences(&[fence.handle], true, 1000);
+            self.handle.wait_for_fences(&[fence.handle], true, 1000000);
         }
     }
 
@@ -621,10 +642,14 @@ impl InnerDevice {
             })
             .collect();
 
+        let cmd_type = submit_info.command_buffers[0].queue_type;
+
         let cmd_infos: Vec<vk::CommandBufferSubmitInfo> = submit_info
             .command_buffers
             .iter()
             .map(|cb| {
+                assert!(cb.queue_type == cmd_type);
+
                 vk::CommandBufferSubmitInfo::default()
                     .command_buffer(cb.handle)
                     .device_mask(0)
@@ -642,7 +667,7 @@ impl InnerDevice {
             None => vk::Fence::null(),
         };
 
-        let queue = match submit_info.command_buffer_type {
+        let queue = match cmd_type {
             QueueType::Graphics => self.graphics_queue,
             QueueType::Compute => self.compute_queue,
             QueueType::Transfer => self.transfer_queue,

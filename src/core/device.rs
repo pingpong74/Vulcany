@@ -7,7 +7,7 @@ use crate::{
     TimelineSemaphore,
     backend::{device::InnerDevice, pipelines::InnerPipelineManager, swapchain::InnerSwapchain},
 };
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, atomic::AtomicUsize};
 
 #[derive(Clone)]
 pub struct Device {
@@ -17,14 +17,36 @@ pub struct Device {
 //Swapchain Impl//
 impl Device {
     pub fn create_swapchain(&self, swapchain_desc: &SwapchainDescription) -> Swapchain {
-        let (loader, swapchain, images, image_views) =
-            self.inner.create_swapchain_data(swapchain_desc);
+        let (loader, swapchain, images, image_views) = self
+            .inner
+            .create_swapchain_data(swapchain_desc, ash::vk::SwapchainKHR::null());
 
         return Swapchain {
             inner: Arc::new(InnerSwapchain {
                 handle: swapchain,
                 swapchain_loader: loader,
-                curr_img_index: 0,
+                curr_img_index: AtomicUsize::new(0),
+                image_views: image_views,
+                images: images,
+                device: self.inner.clone(),
+            }),
+        };
+    }
+
+    pub fn recreate_swapchain(
+        &self,
+        swapchain_desc: &SwapchainDescription,
+        old_swapchain: &Swapchain,
+    ) -> Swapchain {
+        let (loader, swapchain, images, image_views) = self
+            .inner
+            .create_swapchain_data(swapchain_desc, old_swapchain.inner.handle);
+
+        return Swapchain {
+            inner: Arc::new(InnerSwapchain {
+                handle: swapchain,
+                swapchain_loader: loader,
+                curr_img_index: AtomicUsize::new(0),
                 image_views: image_views,
                 images: images,
                 device: self.inner.clone(),
@@ -43,7 +65,9 @@ impl Device {
         self.inner.destroy_buffer(id);
     }
 
-    pub fn write_data_to_buffer<T: Copy>(&self, buffer_id: BufferID, data: &[T]) {}
+    pub fn write_data_to_buffer<T: Copy>(&self, buffer_id: BufferID, data: &[T]) {
+        self.inner.write_data_to_buffer(buffer_id, data);
+    }
 }
 
 // Image //
@@ -94,12 +118,21 @@ impl Device {
     pub fn allocate_command_buffer(
         &self,
         level: CommandBufferLevel,
-        cmd_type: QueueType,
+        queue_type: QueueType,
     ) -> CommandBuffer {
         return CommandBuffer {
-            handle: self.inner.allocate_command_buffers(level, cmd_type),
+            handle: self.inner.allocate_command_buffers(level, queue_type),
+            queue_type,
             device: self.inner.clone(),
         };
+    }
+
+    pub fn free_command_buffer(&self, cmd_buffer: CommandBuffer) {
+        self.inner.free_command_buffer(cmd_buffer);
+    }
+
+    pub fn reset_command_pool(&self, queue_type: QueueType) {
+        self.inner.reset_command_pool(queue_type);
     }
 }
 
@@ -129,6 +162,14 @@ impl Device {
 
     pub fn reset_fence(&self, fence: Fence) {
         self.inner.reset_fence(fence);
+    }
+
+    pub fn destroy_fence(&self, fence: Fence) {
+        self.inner.destroy_fence(fence);
+    }
+
+    pub fn destroy_semaphore(&self, semaphore: Semaphore) {
+        self.inner.destroy_semaphore(semaphore);
     }
 }
 

@@ -1,6 +1,7 @@
 use ash::vk;
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use smallvec::SmallVec;
+use std::ops::BitOr;
 use std::sync::Arc;
 
 use crate::{BufferID, CommandBuffer, Fence, ImageID, ImageViewID, Semaphore};
@@ -23,6 +24,7 @@ pub struct DeviceDescription {
     pub use_transfer_queue: bool,
 }
 
+#[derive(Clone)]
 pub struct SwapchainDescription {
     pub image_count: u32,
     pub width: u32,
@@ -47,31 +49,67 @@ impl MemoryType {
 }
 
 ///// BUFFER DESCRIPTION /////
-#[derive(Clone)]
-pub enum BufferUsage {
-    Staging,
-    Storage,
-    Vertex,
-    Index,
-    Uniform,
-    Indirect,
-    TransferSrc,
-    TransferDst,
+pub struct BufferUsage {
+    pub(crate) flags: vk::BufferUsageFlags,
 }
 
 impl BufferUsage {
+    // Define public constants for the common usage types
+    pub const STORAGE: Self = Self {
+        flags: vk::BufferUsageFlags::STORAGE_BUFFER,
+    };
+    pub const VERTEX: Self = Self {
+        flags: vk::BufferUsageFlags::VERTEX_BUFFER,
+    };
+    pub const INDEX: Self = Self {
+        flags: vk::BufferUsageFlags::INDEX_BUFFER,
+    };
+    pub const UNIFORM: Self = Self {
+        flags: vk::BufferUsageFlags::UNIFORM_BUFFER,
+    };
+    pub const INDIRECT: Self = Self {
+        flags: vk::BufferUsageFlags::INDIRECT_BUFFER,
+    };
+    pub const TRANSFER_SRC: Self = Self {
+        flags: vk::BufferUsageFlags::TRANSFER_SRC,
+    };
+    pub const TRANSFER_DST: Self = Self {
+        flags: vk::BufferUsageFlags::TRANSFER_DST,
+    };
+
+    // A method to expose the inner flags for use with ash
     pub(crate) fn to_vk_flag(&self) -> vk::BufferUsageFlags {
-        match self {
-            Self::Staging => {
-                vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST
-            }
-            Self::Storage => vk::BufferUsageFlags::STORAGE_BUFFER,
-            Self::Vertex => vk::BufferUsageFlags::VERTEX_BUFFER,
-            Self::Index => vk::BufferUsageFlags::INDEX_BUFFER,
-            Self::Uniform => vk::BufferUsageFlags::UNIFORM_BUFFER,
-            Self::Indirect => vk::BufferUsageFlags::INDIRECT_BUFFER,
-            Self::TransferSrc => vk::BufferUsageFlags::TRANSFER_SRC,
-            Self::TransferDst => vk::BufferUsageFlags::TRANSFER_DST,
+        self.flags
+    }
+}
+
+// Implement the BitOr trait to allow the '|' operator
+impl BitOr for BufferUsage {
+    type Output = Self;
+
+    // This method defines what happens when you use 'a | b'
+    fn bitor(self, other: Self) -> Self::Output {
+        Self {
+            flags: self.flags | other.flags,
+        }
+    }
+}
+
+// Implement the BitOrAssign trait to allow the '|= ' operator (optional but good practice)
+impl BitOr<BufferUsage> for &BufferUsage {
+    type Output = BufferUsage;
+    fn bitor(self, other: BufferUsage) -> Self::Output {
+        BufferUsage {
+            flags: self.flags | other.flags,
+        }
+    }
+}
+
+impl BitOr<&BufferUsage> for BufferUsage {
+    type Output = BufferUsage;
+    fn bitor(self, other: &BufferUsage) -> Self::Output {
+        BufferUsage {
+            flags: self.flags | other.flags,
         }
     }
 }
@@ -86,7 +124,7 @@ pub struct BufferDescription {
 impl Default for BufferDescription {
     fn default() -> Self {
         return BufferDescription {
-            usage: BufferUsage::Storage,
+            usage: BufferUsage::STORAGE,
             size: 10,
             memory_type: MemoryType::Auto,
             create_mapped: false,
@@ -134,22 +172,59 @@ impl ImageUsage {
         };
     }
 }
-
 #[derive(Clone)]
-pub enum ImageFormat {
-    R8G8B8A8,
-    B8G8R8A8,
-    R16G16B16A16Float,
-    D32Float,
+pub enum Format {
+    // --- Unsigned Normalized (UNORM) Formats - Standard Color & Textures ---
+    Rgba8Unorm,  // R8G8B8A8_UNORM (Standard color/texture format)
+    Bgra8Unorm,  // B8G8R8A8_UNORM (Common swapchain format)
+    Rgb565Unorm, // R5G6B5_UNORM (Low-end texture, 16-bit packed)
+
+    // --- Signed/Unsigned Integers (SINT/UINT) ---
+    Rgba8Uint,  // R8G8B8A8_UINT (Used for data buffers/image storage)
+    Rgba32Sint, // R32G32B32A32_SINT (Used for data buffers)
+
+    // --- Float Formats (SFLOAT) - High Precision & Data ---
+    Rgba16Float, // R16G16B16A16_SFLOAT (HDR/Intermediate targets)
+    Rg32Float,   // R32G32_SFLOAT (Used for 2D position or data)
+    Rgba32Float, // R32G32B32A32_SFLOAT (Highest precision data storage)
+    R32Float,    // R32_SFLOAT (Single channel float data)
+
+    // --- Depth and Stencil Formats ---
+    D32Float,       // D32_SFLOAT (32-bit depth-only)
+    D24UnormS8Uint, // D24_UNORM_S8_UINT (Most common combined Depth/Stencil)
+    D16Unorm,       // D16_UNORM (16-bit depth-only)
+
+    // --- Block Compressed (Slightly less common but essential for assets) ---
+    BC1RgbaUnorm, // BC1_RGBA_UNORM_BLOCK (DXT1 - Low quality compression)
+    BC7Unorm,     // BC7_UNORM_BLOCK (High quality compression)
 }
 
-impl ImageFormat {
+impl Format {
     pub(crate) const fn to_vk_format(&self) -> vk::Format {
         return match self {
-            Self::R8G8B8A8 => vk::Format::R8G8B8A8_UNORM,
-            Self::B8G8R8A8 => vk::Format::B8G8R8A8_UNORM,
-            Self::R16G16B16A16Float => vk::Format::R16G16B16A16_SFLOAT,
+            // Unsigned Normalized (UNORM)
+            Self::Rgba8Unorm => vk::Format::R8G8B8A8_UNORM,
+            Self::Bgra8Unorm => vk::Format::B8G8R8A8_UNORM,
+            Self::Rgb565Unorm => vk::Format::R5G6B5_UNORM_PACK16,
+
+            // Signed/Unsigned Integers (SINT/UINT)
+            Self::Rgba8Uint => vk::Format::R8G8B8A8_UINT,
+            Self::Rgba32Sint => vk::Format::R32G32B32A32_SINT,
+
+            // Float Formats (SFLOAT)
+            Self::Rgba16Float => vk::Format::R16G16B16A16_SFLOAT,
+            Self::Rg32Float => vk::Format::R32G32_SFLOAT,
+            Self::Rgba32Float => vk::Format::R32G32B32A32_SFLOAT,
+            Self::R32Float => vk::Format::R32_SFLOAT,
+
+            // Depth and Stencil
             Self::D32Float => vk::Format::D32_SFLOAT,
+            Self::D24UnormS8Uint => vk::Format::D24_UNORM_S8_UINT,
+            Self::D16Unorm => vk::Format::D16_UNORM,
+
+            // Block Compressed
+            Self::BC1RgbaUnorm => vk::Format::BC1_RGBA_UNORM_BLOCK,
+            Self::BC7Unorm => vk::Format::BC7_UNORM_BLOCK,
         };
     }
 }
@@ -212,7 +287,7 @@ impl ImageLayout {
 
 pub struct ImageDescription {
     pub usage: ImageUsage,
-    pub format: ImageFormat,
+    pub format: Format,
     pub image_type: ImageType,
     pub height: u32,
     pub width: u32,
@@ -227,7 +302,7 @@ impl Default for ImageDescription {
     fn default() -> Self {
         return Self {
             usage: ImageUsage::Sampled,
-            format: ImageFormat::R8G8B8A8,
+            format: Format::Rgba16Float,
             image_type: ImageType::Type2D,
             height: 1,
             width: 1,
@@ -464,7 +539,7 @@ impl Default for TextureDescription {
 }
 
 //// Command Pools and Command Buffers ////
-
+#[derive(Clone, Copy, PartialEq)]
 pub enum QueueType {
     Graphics,
     Transfer,
@@ -649,8 +724,8 @@ impl Default for RenderingAttachment {
             image_layout: ImageLayout::Undefined,
             resolve_image_view: None,
             resolve_image_layout: ImageLayout::Undefined,
-            load_op: LoadOp::DontCare,
-            store_op: StoreOp::DontCare,
+            load_op: LoadOp::Clear,
+            store_op: StoreOp::Store,
             resolve_mode: ResolveMode::None,
             clear_value: ClearValue::ColorFloat([0.0, 0.0, 0.0, 0.0]),
         }
@@ -823,7 +898,6 @@ pub struct SemaphoreInfo {
 }
 
 pub struct QueueSubmitInfo {
-    pub command_buffer_type: QueueType,
     pub fence: Option<Fence>,
     pub command_buffers: SmallVec<[CommandBuffer; 2]>,
     pub wait_semaphores: SmallVec<[SemaphoreInfo; 2]>,
@@ -886,7 +960,7 @@ impl PolygonMode {
 pub struct DepthStencilOptions {
     pub depth_test_enable: bool,
     pub depth_write_enable: bool,
-    pub depth_compare_op: vk::CompareOp,
+    pub depth_compare_op: CompareOp,
     pub stencil_test_enable: bool,
 }
 
@@ -895,7 +969,7 @@ impl Default for DepthStencilOptions {
         Self {
             depth_test_enable: true,
             depth_write_enable: true,
-            depth_compare_op: vk::CompareOp::LESS,
+            depth_compare_op: CompareOp::Less,
             stencil_test_enable: false,
         }
     }
@@ -920,15 +994,15 @@ impl Default for VertexInputDescription {
 //Outputs for dynamic rendering
 #[derive(Clone)]
 pub struct PipelineOutputs {
-    pub color: Vec<ImageFormat>,
-    pub depth: Option<ImageFormat>,
-    pub stencil: Option<ImageFormat>,
+    pub color: Vec<Format>,
+    pub depth: Option<Format>,
+    pub stencil: Option<Format>,
 }
 
 impl Default for PipelineOutputs {
     fn default() -> Self {
         return PipelineOutputs {
-            color: vec![ImageFormat::R16G16B16A16Float],
+            color: vec![Format::Rgba16Float],
             depth: None,
             stencil: None,
         };
@@ -943,7 +1017,6 @@ pub struct RasterizationPipelineDescription {
     pub cull_mode: CullMode,
     pub front_face: FrontFace,
     pub polygon_mode: PolygonMode,
-    pub line_width: f32,
     pub depth_stencil: DepthStencilOptions,
     pub alpha_blend_enable: bool,
     pub outputs: PipelineOutputs,
@@ -958,7 +1031,6 @@ impl Default for RasterizationPipelineDescription {
             cull_mode: CullMode::Back,
             front_face: FrontFace::CounterClockwise,
             polygon_mode: PolygonMode::Fill,
-            line_width: 1.0,
             depth_stencil: DepthStencilOptions::default(),
             alpha_blend_enable: false,
             outputs: PipelineOutputs::default(),

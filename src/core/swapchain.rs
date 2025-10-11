@@ -1,7 +1,10 @@
 use super::instance::Instance;
 use std::sync::Arc;
 
-use crate::{Fence, ImageID, ImageViewID, Semaphore, backend::swapchain::InnerSwapchain};
+use crate::{
+    Fence, ImageID, ImageViewID, Semaphore, SwapchainDescription,
+    backend::swapchain::InnerSwapchain,
+};
 
 #[derive(Clone)]
 pub struct Swapchain {
@@ -17,7 +20,7 @@ impl Swapchain {
         return self.inner.acquire_image(signal_semaphore, signal_fence);
     }
 
-    pub fn preset(&self, wait_semaphore: &Semaphore) {
-        self.inner.preset(wait_semaphore);
+    pub fn present(&self, wait_semaphore: &[Semaphore]) {
+        self.inner.present(wait_semaphore);
     }
 }

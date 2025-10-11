@@ -14,7 +14,7 @@ struct VertexOutput {
 [shader("vertex")]
 VertexOutput main(VertexInput vsin) {
   VertexOutput output;
-  output.pos = float4(vsin.pos.xy, 0, 0);
+  output.pos = float4(vsin.pos, 0, 1);
   output.color = vsin.color;
 
   return output;

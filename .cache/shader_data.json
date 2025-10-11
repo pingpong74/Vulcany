@@ -1,12 +1,12 @@
 {
-  "examples/shaders/fragment_shader.slang": {
-    "slang": "examples/shaders/fragment_shader.slang",
-    "spv": ".cache/fragment_shader.spv",
-    "timestamp": 1757734912
-  },
   "examples/shaders/vertex_shader.slang": {
     "slang": "examples/shaders/vertex_shader.slang",
     "spv": ".cache/vertex_shader.spv",
-    "timestamp": 1757743395
+    "timestamp": 1760118047
+  },
+  "examples/shaders/fragment_shader.slang": {
+    "slang": "examples/shaders/fragment_shader.slang",
+    "spv": ".cache/fragment_shader.spv",
+    "timestamp": 1760118030
   }
 }

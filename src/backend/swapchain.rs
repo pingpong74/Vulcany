@@ -1,14 +1,15 @@
 use ash::vk;
-use std::sync::Arc;
+use std::sync::atomic::AtomicUsize;
+use std::sync::{Arc, Mutex};
 
-use crate::{Fence, ImageID, ImageViewID, Semaphore, Swapchain};
+use crate::{Fence, ImageID, ImageViewID, Semaphore, Swapchain, SwapchainDescription};
 
 use crate::backend::device::InnerDevice;
 
 pub(crate) struct InnerSwapchain {
     pub(crate) swapchain_loader: ash::khr::swapchain::Device,
     pub(crate) handle: vk::SwapchainKHR,
-    pub(crate) curr_img_index: usize,
+    pub(crate) curr_img_index: AtomicUsize,
     pub(crate) images: Vec<ImageID>,
     pub(crate) image_views: Vec<ImageViewID>,
     pub(crate) device: Arc<InnerDevice>,
@@ -41,16 +42,21 @@ impl InnerSwapchain {
                 .expect("Failed to acquire next image")
         };
 
+        self.curr_img_index
+            .store(index as usize, std::sync::atomic::Ordering::SeqCst);
+
         return (
             self.images[index as usize],
             self.image_views[index as usize],
         );
     }
 
-    pub(crate) fn preset(&self, sempahore: &Semaphore) {
+    pub(crate) fn present(&self, sempahores: &[Semaphore]) {
         let handle = [self.handle];
-        let index = [self.curr_img_index as u32];
-        let sem = [sempahore.handle()];
+        let index = [self
+            .curr_img_index
+            .load(std::sync::atomic::Ordering::SeqCst) as u32];
+        let sem: Vec<vk::Semaphore> = sempahores.into_iter().map(|s| s.handle()).collect();
 
         let present_info = vk::PresentInfoKHR::default()
             .swapchains(&handle)
@@ -63,8 +69,6 @@ impl InnerSwapchain {
                 .expect("Failed to preset image!!");
         }
     }
-
-    pub(crate) fn resize() {}
 }
 
 impl Drop for InnerSwapchain {
