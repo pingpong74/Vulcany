@@ -3,11 +3,10 @@ use crate::{
     core::{definations::DeviceDescription, definations::InstanceDescription},
 };
 
-use ash::vk::{self, Handle};
-use image::imageops::FilterType::Triangle;
+use ash::vk;
+//use image::imageops::FilterType::Triangle;
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle, RawDisplayHandle, RawWindowHandle};
 use std::{ffi::CStr, sync::Arc};
-use vk_mem::AllocatorCreateInfo;
 
 pub(crate) struct Surface {
     pub(crate) handle: vk::SurfaceKHR,
@@ -45,37 +44,31 @@ pub(crate) struct InnerInstance {
 }
 
 impl InnerInstance {
-    pub(crate) fn new<W: HasDisplayHandle + HasWindowHandle>(
-        instance_create_info: &InstanceDescription<W>,
-    ) -> InnerInstance {
+    pub(crate) fn new<W: HasDisplayHandle + HasWindowHandle>(instance_create_info: &InstanceDescription<W>) -> InnerInstance {
         let entry = ash::Entry::linked();
 
         let mut required_extensions = vec![ash::khr::surface::NAME.as_ptr()];
 
-        let raw_window_handle = instance_create_info
-            .window
-            .window_handle()
-            .expect("Failed to accuqire raw window handle")
-            .as_raw();
+        let raw_window_handle = instance_create_info.window.window_handle().expect("Failed to accuqire raw window handle").as_raw();
 
         match raw_window_handle {
             //Windows
-            raw_window_handle::RawWindowHandle::Win32(h) => {
+            raw_window_handle::RawWindowHandle::Win32(_) => {
                 required_extensions.push(ash::khr::win32_surface::NAME.as_ptr());
             }
 
             //Wayland
-            raw_window_handle::RawWindowHandle::Wayland(w) => {
+            raw_window_handle::RawWindowHandle::Wayland(_) => {
                 required_extensions.push(ash::khr::wayland_surface::NAME.as_ptr());
             }
 
             //Xcb
-            raw_window_handle::RawWindowHandle::Xcb(w) => {
+            raw_window_handle::RawWindowHandle::Xcb(_) => {
                 required_extensions.push(ash::khr::xcb_surface::NAME.as_ptr());
             }
 
             //Apple
-            raw_window_handle::RawWindowHandle::AppKit(w) => {
+            raw_window_handle::RawWindowHandle::AppKit(_) => {
                 required_extensions.push(ash::ext::metal_surface::NAME.as_ptr());
             }
 
@@ -92,31 +85,18 @@ impl InnerInstance {
             ..Default::default()
         };
 
-        let mut create_info = vk::InstanceCreateInfo::default()
-            .application_info(&app_info)
-            .enabled_extension_names(&required_extensions);
+        let mut create_info = vk::InstanceCreateInfo::default().application_info(&app_info).enabled_extension_names(&required_extensions);
 
         let mut debug_create_info = vk::DebugUtilsMessengerCreateInfoEXT::default()
-            .message_severity(
-                vk::DebugUtilsMessageSeverityFlagsEXT::ERROR
-                    | vk::DebugUtilsMessageSeverityFlagsEXT::WARNING,
-            )
-            .message_type(
-                vk::DebugUtilsMessageTypeFlagsEXT::GENERAL
-                    | vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE
-                    | vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION,
-            )
+            .message_severity(vk::DebugUtilsMessageSeverityFlagsEXT::ERROR | vk::DebugUtilsMessageSeverityFlagsEXT::WARNING)
+            .message_type(vk::DebugUtilsMessageTypeFlagsEXT::GENERAL | vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE | vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION)
             .pfn_user_callback(Some(InnerInstance::vulkan_debug_callback));
 
         if instance_create_info.enable_validation_layers {
             create_info = create_info.push_next(&mut debug_create_info);
         }
 
-        let instance = unsafe {
-            entry
-                .create_instance(&create_info, None)
-                .expect("Failed to create instance")
-        };
+        let instance = unsafe { entry.create_instance(&create_info, None).expect("Failed to create instance") };
 
         let mut debug_messenger: Option<vk::DebugUtilsMessengerEXT> = None;
         let mut debug_loader: Option<ash::ext::debug_utils::Instance> = None;
@@ -124,19 +104,12 @@ impl InnerInstance {
         if instance_create_info.enable_validation_layers {
             let debug_utils_loader = ash::ext::debug_utils::Instance::new(&entry, &instance);
 
-            debug_messenger = Some(
-                unsafe {
-                    debug_utils_loader.create_debug_utils_messenger(&debug_create_info, None)
-                }
-                .expect("Debug Utils Messenger creation failed"),
-            );
+            debug_messenger = Some(unsafe { debug_utils_loader.create_debug_utils_messenger(&debug_create_info, None) }.expect("Debug Utils Messenger creation failed"));
 
             debug_loader = Some(debug_utils_loader);
         }
 
-        let surface = unsafe {
-            InnerInstance::create_surface(&entry, &instance, &instance_create_info.window)
-        };
+        let surface = unsafe { InnerInstance::create_surface(&entry, &instance, &instance_create_info.window) };
 
         return InnerInstance {
             entry: entry,
@@ -149,10 +122,7 @@ impl InnerInstance {
         };
     }
 
-    pub(crate) fn create_device_data(
-        &self,
-        device_create_info: &DeviceDescription,
-    ) -> (ash::Device, PhysicalDevice, vk_mem::Allocator) {
+    pub(crate) fn create_device_data(&self, _device_create_info: &DeviceDescription) -> (ash::Device, PhysicalDevice, vk_mem::Allocator) {
         let physical_device = {
             let dev = self.select_physical_device();
             if dev.is_none() {
@@ -178,23 +148,15 @@ impl InnerInstance {
         let priorities = [1.0_f32];
         let queue_infos: Vec<_> = unique_families
             .iter()
-            .map(|&family| {
-                vk::DeviceQueueCreateInfo::default()
-                    .queue_family_index(family)
-                    .queue_priorities(&priorities)
-            })
+            .map(|&family| vk::DeviceQueueCreateInfo::default().queue_family_index(family).queue_priorities(&priorities))
             .collect();
 
         // Required device extensions (swapchain needed for presentation)
-        let device_extensions = vec![
-            ash::khr::swapchain::NAME.as_ptr(),
-            ash::khr::synchronization2::NAME.as_ptr(),
-        ];
+        let device_extensions = vec![ash::khr::swapchain::NAME.as_ptr(), ash::khr::synchronization2::NAME.as_ptr()];
 
         let features = vk::PhysicalDeviceFeatures::default();
 
-        let mut dynamic_rendering_features =
-            vk::PhysicalDeviceDynamicRenderingFeatures::default().dynamic_rendering(true);
+        let mut dynamic_rendering_features = vk::PhysicalDeviceDynamicRenderingFeatures::default().dynamic_rendering(true);
 
         let mut indexing_features = vk::PhysicalDeviceDescriptorIndexingFeatures::default()
             .shader_sampled_image_array_non_uniform_indexing(true)
@@ -208,11 +170,9 @@ impl InnerInstance {
             .descriptor_binding_uniform_buffer_update_after_bind(true)
             .descriptor_binding_uniform_texel_buffer_update_after_bind(true);
 
-        let mut sync2 =
-            vk::PhysicalDeviceSynchronization2Features::default().synchronization2(true);
+        let mut sync2 = vk::PhysicalDeviceSynchronization2Features::default().synchronization2(true);
 
-        let mut timeline_sem =
-            vk::PhysicalDeviceTimelineSemaphoreFeatures::default().timeline_semaphore(true);
+        let mut timeline_sem = vk::PhysicalDeviceTimelineSemaphoreFeatures::default().timeline_semaphore(true);
 
         let mut features2 = vk::PhysicalDeviceFeatures2::default()
             .push_next(&mut indexing_features)
@@ -226,66 +186,37 @@ impl InnerInstance {
             .enabled_extension_names(&device_extensions)
             .push_next(&mut features2);
 
-        let dev = unsafe {
-            self.handle
-                .create_device(physical_device.handle, &create_info, None)
-                .expect("Failed to create logical device")
-        };
+        let dev = unsafe { self.handle.create_device(physical_device.handle, &create_info, None).expect("Failed to create logical device") };
 
-        let mut allocator_create_info =
-            vk_mem::AllocatorCreateInfo::new(&self.handle, &dev, physical_device.handle);
+        let mut allocator_create_info = vk_mem::AllocatorCreateInfo::new(&self.handle, &dev, physical_device.handle);
         allocator_create_info.vulkan_api_version = self.api_version.clone() as u32;
 
-        let allocator = unsafe {
-            vk_mem::Allocator::new(allocator_create_info).expect("Failed to create vma allocator")
-        };
+        let allocator = unsafe { vk_mem::Allocator::new(allocator_create_info).expect("Failed to create vma allocator") };
 
         unsafe {
-            let transfer =
-                dev.get_device_queue(physical_device.queue_families.transfer_family.unwrap(), 0);
+            let transfer = dev.get_device_queue(physical_device.queue_families.transfer_family.unwrap(), 0);
         }
 
         return (dev, physical_device, allocator);
     }
 
-    pub(crate) fn create_commands_pools(
-        device: &ash::Device,
-        physical_device: &PhysicalDevice,
-    ) -> (vk::CommandPool, vk::CommandPool, vk::CommandPool) {
-        let pool_create_info = vk::CommandPoolCreateInfo::default()
-            .queue_family_index(physical_device.queue_families.graphics_family.unwrap());
+    pub(crate) fn create_commands_pools(device: &ash::Device, physical_device: &PhysicalDevice) -> (vk::CommandPool, vk::CommandPool, vk::CommandPool) {
+        let pool_create_info = vk::CommandPoolCreateInfo::default().queue_family_index(physical_device.queue_families.graphics_family.unwrap());
 
-        let graphics_pool = unsafe {
-            device
-                .create_command_pool(&pool_create_info, None)
-                .expect("Failed to create command pool")
-        };
+        let graphics_pool = unsafe { device.create_command_pool(&pool_create_info, None).expect("Failed to create command pool") };
 
-        let pool_create_info = pool_create_info
-            .queue_family_index(physical_device.queue_families.transfer_family.unwrap());
+        let pool_create_info = pool_create_info.queue_family_index(physical_device.queue_families.transfer_family.unwrap());
 
-        let transfer_pool = unsafe {
-            device
-                .create_command_pool(&pool_create_info, None)
-                .expect("Failed to create command pool")
-        };
+        let transfer_pool = unsafe { device.create_command_pool(&pool_create_info, None).expect("Failed to create command pool") };
 
-        let pool_create_info = pool_create_info
-            .queue_family_index(physical_device.queue_families.compute_family.unwrap());
+        let pool_create_info = pool_create_info.queue_family_index(physical_device.queue_families.compute_family.unwrap());
 
-        let compute_pool = unsafe {
-            device
-                .create_command_pool(&pool_create_info, None)
-                .expect("Failed to create command pool")
-        };
+        let compute_pool = unsafe { device.create_command_pool(&pool_create_info, None).expect("Failed to create command pool") };
 
         return (graphics_pool, transfer_pool, compute_pool);
     }
 
-    pub(crate) fn create_queues(
-        device: &ash::Device,
-        physical_device: &PhysicalDevice,
-    ) -> (vk::Queue, vk::Queue, vk::Queue) {
+    pub(crate) fn create_queues(device: &ash::Device, physical_device: &PhysicalDevice) -> (vk::Queue, vk::Queue, vk::Queue) {
         return unsafe {
             (
                 device.get_device_queue(physical_device.queue_families.graphics_family.unwrap(), 0),
@@ -300,63 +231,37 @@ impl InnerInstance {
 
 //Surface creation
 impl InnerInstance {
-    unsafe fn create_surface<W: HasDisplayHandle + HasWindowHandle>(
-        entry: &ash::Entry,
-        instance: &ash::Instance,
-        window: &Arc<W>,
-    ) -> Surface {
+    unsafe fn create_surface<W: HasDisplayHandle + HasWindowHandle>(entry: &ash::Entry, instance: &ash::Instance, window: &Arc<W>) -> Surface {
         let raw_window = window.window_handle().unwrap().as_raw();
         let raw_display = window.display_handle().unwrap().as_raw();
 
         let surface_handle = match (raw_window, raw_display) {
             // ---------------- Windows ----------------
-            (RawWindowHandle::Win32(w), RawDisplayHandle::Windows(d)) => {
-                let info = ash::vk::Win32SurfaceCreateInfoKHR::default()
-                    .hinstance(w.hinstance.unwrap().get())
-                    .hwnd(w.hwnd.get());
+            (RawWindowHandle::Win32(w), RawDisplayHandle::Windows(_)) => {
+                let info = ash::vk::Win32SurfaceCreateInfoKHR::default().hinstance(w.hinstance.unwrap().get()).hwnd(w.hwnd.get());
                 let loader = ash::khr::win32_surface::Instance::new(entry, instance);
-                unsafe {
-                    loader
-                        .create_win32_surface(&info, None)
-                        .expect("Failed to create surface")
-                }
+                unsafe { loader.create_win32_surface(&info, None).expect("Failed to create surface") }
             }
 
             // ---------------- XCB ----------------
             (RawWindowHandle::Xcb(w), RawDisplayHandle::Xcb(d)) => {
-                let info = ash::vk::XcbSurfaceCreateInfoKHR::default()
-                    .connection(d.connection.unwrap().as_ptr())
-                    .window(w.window.get());
+                let info = ash::vk::XcbSurfaceCreateInfoKHR::default().connection(d.connection.unwrap().as_ptr()).window(w.window.get());
                 let loader = ash::khr::xcb_surface::Instance::new(entry, instance);
-                unsafe {
-                    loader
-                        .create_xcb_surface(&info, None)
-                        .expect("Failed to create surface")
-                }
+                unsafe { loader.create_xcb_surface(&info, None).expect("Failed to create surface") }
             }
 
             // ---------------- Wayland ----------------
             (RawWindowHandle::Wayland(w), RawDisplayHandle::Wayland(d)) => {
-                let info = ash::vk::WaylandSurfaceCreateInfoKHR::default()
-                    .display(d.display.as_ptr())
-                    .surface(w.surface.as_ptr());
+                let info = ash::vk::WaylandSurfaceCreateInfoKHR::default().display(d.display.as_ptr()).surface(w.surface.as_ptr());
                 let loader = ash::khr::wayland_surface::Instance::new(entry, instance);
-                unsafe {
-                    loader
-                        .create_wayland_surface(&info, None)
-                        .expect("Failed to create surface")
-                }
+                unsafe { loader.create_wayland_surface(&info, None).expect("Failed to create surface") }
             }
 
             // ---------------- macOS ----------------
             (RawWindowHandle::AppKit(w), RawDisplayHandle::AppKit(_)) => {
                 let info = ash::vk::MetalSurfaceCreateInfoEXT::default().layer(w.ns_view.as_ptr());
                 let loader = ash::ext::metal_surface::Instance::new(entry, instance);
-                unsafe {
-                    loader
-                        .create_metal_surface(&info, None)
-                        .expect("Failed to create surface")
-                }
+                unsafe { loader.create_metal_surface(&info, None).expect("Failed to create surface") }
             }
 
             // ---------------- Unsupported ----------------
@@ -372,14 +277,8 @@ impl InnerInstance {
 
 //Physical device selection
 impl InnerInstance {
-    fn get_queue_families(
-        &self,
-        physical_device: ash::vk::PhysicalDevice,
-    ) -> Option<QueueFamilyIndices> {
-        let queue_families = unsafe {
-            self.handle
-                .get_physical_device_queue_family_properties(physical_device)
-        };
+    fn get_queue_families(&self, physical_device: ash::vk::PhysicalDevice) -> Option<QueueFamilyIndices> {
+        let queue_families = unsafe { self.handle.get_physical_device_queue_family_properties(physical_device) };
 
         let mut indices = QueueFamilyIndices {
             graphics_family: None,
@@ -390,43 +289,26 @@ impl InnerInstance {
 
         for (i, family) in queue_families.iter().enumerate() {
             // Graphics
-            if family.queue_flags.contains(ash::vk::QueueFlags::GRAPHICS)
-                && indices.graphics_family.is_none()
-            {
+            if family.queue_flags.contains(ash::vk::QueueFlags::GRAPHICS) && indices.graphics_family.is_none() {
                 indices.graphics_family = Some(i as u32);
             }
 
             // Compute (dedicated if possible)
-            if family.queue_flags.contains(ash::vk::QueueFlags::COMPUTE)
-                && indices.compute_family.is_none()
-            {
+            if family.queue_flags.contains(ash::vk::QueueFlags::COMPUTE) && indices.compute_family.is_none() {
                 if !family.queue_flags.contains(ash::vk::QueueFlags::GRAPHICS) {
                     indices.compute_family = Some(i as u32);
                 }
             }
 
             // Transfer (dedicated if possible)
-            if family.queue_flags.contains(ash::vk::QueueFlags::TRANSFER)
-                && indices.transfer_family.is_none()
-            {
-                if !family.queue_flags.contains(ash::vk::QueueFlags::GRAPHICS)
-                    && !family.queue_flags.contains(ash::vk::QueueFlags::COMPUTE)
-                {
+            if family.queue_flags.contains(ash::vk::QueueFlags::TRANSFER) && indices.transfer_family.is_none() {
+                if !family.queue_flags.contains(ash::vk::QueueFlags::GRAPHICS) && !family.queue_flags.contains(ash::vk::QueueFlags::COMPUTE) {
                     indices.transfer_family = Some(i as u32);
                 }
             }
 
             // Presentation
-            let present_support = unsafe {
-                self.surface
-                    .loader
-                    .get_physical_device_surface_support(
-                        physical_device,
-                        i as u32,
-                        self.surface.handle,
-                    )
-                    .unwrap_or(false)
-            };
+            let present_support = unsafe { self.surface.loader.get_physical_device_surface_support(physical_device, i as u32, self.surface.handle).unwrap_or(false) };
             if present_support && indices.presetation_family.is_none() {
                 indices.presetation_family = Some(i as u32);
             }
@@ -439,47 +321,24 @@ impl InnerInstance {
         }
     }
 
-    fn get_swapchain_support(
-        &self,
-        physical_device: ash::vk::PhysicalDevice,
-    ) -> Option<SwapchainSupport> {
+    fn get_swapchain_support(&self, physical_device: ash::vk::PhysicalDevice) -> Option<SwapchainSupport> {
         unsafe {
-            let capabilities = self
-                .surface
-                .loader
-                .get_physical_device_surface_capabilities(physical_device, self.surface.handle)
-                .ok()?;
+            let capabilities = self.surface.loader.get_physical_device_surface_capabilities(physical_device, self.surface.handle).ok()?;
 
-            let formats = self
-                .surface
-                .loader
-                .get_physical_device_surface_formats(physical_device, self.surface.handle)
-                .ok()?;
+            let formats = self.surface.loader.get_physical_device_surface_formats(physical_device, self.surface.handle).ok()?;
 
-            let present_modes = self
-                .surface
-                .loader
-                .get_physical_device_surface_present_modes(physical_device, self.surface.handle)
-                .ok()?;
+            let present_modes = self.surface.loader.get_physical_device_surface_present_modes(physical_device, self.surface.handle).ok()?;
 
             if formats.is_empty() || present_modes.is_empty() {
                 return None;
             } else {
-                return Some(SwapchainSupport {
-                    capabilities,
-                    formats,
-                    present_modes,
-                });
+                return Some(SwapchainSupport { capabilities, formats, present_modes });
             }
         }
     }
 
     fn check_device_extension_support(&self, device: ash::vk::PhysicalDevice) -> bool {
-        let available_extensions = unsafe {
-            self.handle
-                .enumerate_device_extension_properties(device)
-                .expect("Failed to enumerate device extensions")
-        };
+        let available_extensions = unsafe { self.handle.enumerate_device_extension_properties(device).expect("Failed to enumerate device extensions") };
 
         let available_extension_names: Vec<&std::ffi::CStr> = available_extensions
             .iter()
@@ -491,29 +350,18 @@ impl InnerInstance {
             .collect();
 
         // Check all required extensions are present
-        self.physical_device_extensions.iter().all(|&required| {
-            available_extension_names
-                .iter()
-                .any(|&avail| avail == required)
-        })
+        self.physical_device_extensions.iter().all(|&required| available_extension_names.iter().any(|&avail| avail == required))
     }
 
     fn select_physical_device(&self) -> Option<PhysicalDevice> {
-        let devices = unsafe {
-            self.handle
-                .enumerate_physical_devices()
-                .expect("Failed to enumerate physical devices")
-        };
+        let devices = unsafe { self.handle.enumerate_physical_devices().expect("Failed to enumerate physical devices") };
 
         let mut best_device: Option<(i32, PhysicalDevice)> = None;
 
         for device in devices {
             let props = unsafe { self.handle.get_physical_device_properties(device) };
 
-            if let (Some(sc), Some(qf)) = (
-                self.get_swapchain_support(device),
-                self.get_queue_families(device),
-            ) {
+            if let (Some(sc), Some(qf)) = (self.get_swapchain_support(device), self.get_queue_families(device)) {
                 if !self.check_device_extension_support(device) {
                     continue;
                 }
@@ -558,11 +406,7 @@ impl InnerInstance {
         data: *const ash::vk::DebugUtilsMessengerCallbackDataEXT,
         _user: *mut std::ffi::c_void,
     ) -> ash::vk::Bool32 {
-        let message = unsafe {
-            std::ffi::CStr::from_ptr((*data).p_message)
-                .to_string_lossy()
-                .into_owned()
-        };
+        let message = unsafe { std::ffi::CStr::from_ptr((*data).p_message).to_string_lossy().into_owned() };
         println!("[VULKAN, {:?} {:?}]: {}", severity, types, message);
 
         ash::vk::FALSE
@@ -573,19 +417,14 @@ impl InnerInstance {
 impl Drop for InnerInstance {
     fn drop(&mut self) {
         unsafe {
-            self.surface
-                .loader
-                .destroy_surface(self.surface.handle, None);
+            self.surface.loader.destroy_surface(self.surface.handle, None);
 
             if !self.debug_messenger.is_none() {
                 if self.debug_loader.is_none() {
                     panic!("Created debug utils but not debug loader")
                 }
 
-                self.debug_loader
-                    .as_mut()
-                    .unwrap()
-                    .destroy_debug_utils_messenger(self.debug_messenger.unwrap(), None);
+                self.debug_loader.as_mut().unwrap().destroy_debug_utils_messenger(self.debug_messenger.unwrap(), None);
             }
 
             self.handle.destroy_instance(None);

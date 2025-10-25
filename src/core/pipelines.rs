@@ -10,10 +10,7 @@ pub struct PipelineManager {
 }
 
 impl PipelineManager {
-    pub fn create_rasterization_pipeline(
-        &self,
-        raster_pipeline_desc: &RasterizationPipelineDescription,
-    ) -> RasterizationPipeline {
+    pub fn create_rasterization_pipeline(&self, raster_pipeline_desc: &RasterizationPipelineDescription) -> RasterizationPipeline {
         let (pipeline, layout) = self.inner.create_raster_pipeline_data(raster_pipeline_desc);
 
         return RasterizationPipeline {
@@ -27,8 +24,6 @@ impl PipelineManager {
 
     pub fn create_compute_pipeline() {}
 }
-
-pub trait Pipeline {}
 
 pub struct RasterizationPipeline {
     pub(crate) inner: Arc<InnerRasterizationPipeline>,

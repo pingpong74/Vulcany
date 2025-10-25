@@ -1,3 +1,6 @@
+
+__include "common.slang";
+
 struct VertexInput {
   [[vk::location(0)]]
   float2 pos;

@@ -1,15 +1,12 @@
-#![allow(unused)]
-
 pub(crate) mod backend;
 
 pub mod core;
 pub mod taskgraph;
 pub mod utils;
 
-pub use core::{
-    commands::*, definations::*, device::*, gpu_resources::*, instance::*, pipelines::*,
-    swapchain::*,
-};
+pub use core::{commands::*, definations::*, device::*, gpu_resources::*, instance::*, pipelines::*, swapchain::*};
+
+pub use taskgraph::{definations::*, task_graph::*};
 
 //Macros here
 //

@@ -1,29 +1,33 @@
 use ash::vk;
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
-use smallvec::SmallVec;
-use std::ops::BitOr;
-use std::sync::Arc;
+use std::{ops::BitOr, sync::Arc, u64};
 
-use crate::{BufferID, CommandBuffer, Fence, ImageID, ImageViewID, Semaphore};
+use crate::{BufferID, ExecutableCommandBuffer, Fence, ImageID, ImageViewID, SamplerID, Semaphore};
 
-//////CORE DESCRIPTIONS//////
+/// Represents the Vulkan API version used by the application.
+/// Basically useless as only Vulkan 1.3 is used. Kept for future proofing
 #[repr(u32)]
 #[derive(Clone)]
 pub enum ApiVersion {
     VkApi1_3 = ash::vk::API_VERSION_1_3,
 }
 
+/// High level abstraction for instance creation
+/// Surface gets created along with the instance
 pub struct InstanceDescription<W: HasDisplayHandle + HasWindowHandle> {
     pub api_version: ApiVersion,
     pub enable_validation_layers: bool,
     pub window: Arc<W>,
 }
 
+/// Very high level abstraction for device creation
+/// Need to add more options
 pub struct DeviceDescription {
     pub use_compute_queue: bool,
     pub use_transfer_queue: bool,
 }
 
+/// High level swapchain description
 #[derive(Clone)]
 pub struct SwapchainDescription {
     pub image_count: u32,
@@ -31,10 +35,26 @@ pub struct SwapchainDescription {
     pub height: u32,
 }
 
-////COMMON MEMORY TYPES////
+/// Specifies the desired properties for a memory allocation.
+///
+/// These variants typically correspond to strategies for choosing
+/// the best available Vulkan memory type on the device.
+/// Maps to vulkan memory allocator
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MemoryType {
+    /// Memory that resides on the **GPU** (Device).
+    ///
+    /// This memory is typically the fastest for the GPU to access for operations
+    /// like rendering or compute, but it is often **inaccessible to the CPU**.
+    /// Used for resources like render targets and high-performance buffers.
     DeviceLocal,
+
+    /// Memory that prefers properties making it efficiently **accessible by the Host (CPU)**,
+    /// while still allowing the Device (GPU) to use it.
     PreferHost,
+
+    /// Allows the allocator to **automatically select** the most appropriate
+    /// memory type based on the resource's usage flags and desired properties.
     Auto,
 }
 
@@ -48,72 +68,80 @@ impl MemoryType {
     }
 }
 
-///// BUFFER DESCRIPTION /////
+/// A wrapper struct for Vulkan's buffer usage flags (`vk::BufferUsageFlags`).
+///
+/// Can be combined using Bitwise Or (|)
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Default)]
 pub struct BufferUsage {
     pub(crate) flags: vk::BufferUsageFlags,
 }
 
 impl BufferUsage {
-    // Define public constants for the common usage types
+    /// Specifies that the buffer is used as a **storage buffer** in shaders.
     pub const STORAGE: Self = Self {
         flags: vk::BufferUsageFlags::STORAGE_BUFFER,
     };
+
+    /// Specifies that the buffer is used as a **vertex buffer** for drawing commands.
     pub const VERTEX: Self = Self {
         flags: vk::BufferUsageFlags::VERTEX_BUFFER,
     };
+
+    /// Specifies that the buffer is used as an **index buffer** for indexed drawing commands.
     pub const INDEX: Self = Self {
         flags: vk::BufferUsageFlags::INDEX_BUFFER,
     };
+
+    /// Specifies that the buffer is used as a **uniform buffer** in shaders.
     pub const UNIFORM: Self = Self {
         flags: vk::BufferUsageFlags::UNIFORM_BUFFER,
     };
+
+    /// Specifies that the buffer contains **indirect dispatch or drawing parameters**.
     pub const INDIRECT: Self = Self {
         flags: vk::BufferUsageFlags::INDIRECT_BUFFER,
     };
+
+    /// Specifies that the buffer can be used as the **source** in a transfer operation
     pub const TRANSFER_SRC: Self = Self {
         flags: vk::BufferUsageFlags::TRANSFER_SRC,
     };
+
+    /// Specifies that the buffer can be used as the **destination** in a transfer operation
     pub const TRANSFER_DST: Self = Self {
         flags: vk::BufferUsageFlags::TRANSFER_DST,
     };
 
-    // A method to expose the inner flags for use with ash
+    // --- Implementation Methods ---
+
+    /// Converts the custom usage struct into the raw Vulkan buffer usage flags.
     pub(crate) fn to_vk_flag(&self) -> vk::BufferUsageFlags {
         self.flags
     }
 }
 
-// Implement the BitOr trait to allow the '|' operator
 impl BitOr for BufferUsage {
     type Output = Self;
-
-    // This method defines what happens when you use 'a | b'
     fn bitor(self, other: Self) -> Self::Output {
-        Self {
-            flags: self.flags | other.flags,
-        }
+        Self { flags: self.flags | other.flags }
     }
 }
 
-// Implement the BitOrAssign trait to allow the '|= ' operator (optional but good practice)
 impl BitOr<BufferUsage> for &BufferUsage {
     type Output = BufferUsage;
     fn bitor(self, other: BufferUsage) -> Self::Output {
-        BufferUsage {
-            flags: self.flags | other.flags,
-        }
+        BufferUsage { flags: self.flags | other.flags }
     }
 }
 
 impl BitOr<&BufferUsage> for BufferUsage {
     type Output = BufferUsage;
     fn bitor(self, other: &BufferUsage) -> Self::Output {
-        BufferUsage {
-            flags: self.flags | other.flags,
-        }
+        BufferUsage { flags: self.flags | other.flags }
     }
 }
 
+/// Buffer descriptions, create mapped works only for perfer host memory type
 pub struct BufferDescription {
     pub usage: BufferUsage,
     pub size: vk::DeviceSize,
@@ -273,9 +301,7 @@ impl ImageLayout {
             ImageLayout::Undefined => vk::ImageLayout::UNDEFINED,
             ImageLayout::General => vk::ImageLayout::GENERAL,
             ImageLayout::ColorAttachment => vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-            ImageLayout::DepthStencilAttachment => {
-                vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL
-            }
+            ImageLayout::DepthStencilAttachment => vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
             ImageLayout::DepthStencilReadOnly => vk::ImageLayout::DEPTH_STENCIL_READ_ONLY_OPTIMAL,
             ImageLayout::ShaderReadOnly => vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
             ImageLayout::TransferSrc => vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
@@ -538,26 +564,65 @@ impl Default for TextureDescription {
     }
 }
 
+//// Descriptors ////
+
+pub struct BufferWriteInfo {
+    pub buffer: BufferID,
+    pub offset: u64,
+    pub range: u64,
+    pub index: u32,
+}
+
+impl Default for BufferWriteInfo {
+    fn default() -> Self {
+        return BufferWriteInfo {
+            buffer: BufferID::null(),
+            offset: 0,
+            range: 0,
+            index: 0,
+        };
+    }
+}
+
+pub enum ImageDescriptorType {
+    SampledImage,
+    StorageImage,
+}
+
+pub struct ImageWriteInfo {
+    pub view: ImageViewID,
+    pub image_descriptor_type: ImageDescriptorType,
+    pub index: u32,
+}
+
+impl Default for ImageWriteInfo {
+    fn default() -> Self {
+        return ImageWriteInfo {
+            view: ImageViewID::null(),
+            image_descriptor_type: ImageDescriptorType::SampledImage,
+            index: 0,
+        };
+    }
+}
+
+pub struct SamplerWriteInfo {
+    pub sampler: SamplerID,
+    pub index: u32,
+}
+
+impl Default for SamplerWriteInfo {
+    fn default() -> Self {
+        return SamplerWriteInfo { sampler: SamplerID::null(), index: 0 };
+    }
+}
+
 //// Command Pools and Command Buffers ////
 #[derive(Clone, Copy, PartialEq)]
 pub enum QueueType {
     Graphics,
     Transfer,
     Compute,
-}
-
-pub enum CommandBufferLevel {
-    Primary,
-    Secondary,
-}
-
-impl CommandBufferLevel {
-    pub(crate) const fn to_vk_flags(&self) -> vk::CommandBufferLevel {
-        match self {
-            Self::Primary => vk::CommandBufferLevel::PRIMARY,
-            Self::Secondary => vk::CommandBufferLevel::SECONDARY,
-        }
-    }
+    None,
 }
 
 pub enum CommandBufferUsage {
@@ -677,10 +742,7 @@ impl ClearValue {
                 color: vk::ClearColorValue { uint32: *v },
             },
             Self::DepthStencil { depth, stencil } => vk::ClearValue {
-                depth_stencil: vk::ClearDepthStencilValue {
-                    depth: *depth,
-                    stencil: *stencil,
-                },
+                depth_stencil: vk::ClearDepthStencilValue { depth: *depth, stencil: *stencil },
             },
         }
     }
@@ -697,10 +759,7 @@ impl ClearValue {
 
     /// Common helper for depth clear
     pub const fn depth_one() -> Self {
-        Self::DepthStencil {
-            depth: 1.0,
-            stencil: 0,
-        }
+        Self::DepthStencil { depth: 1.0, stencil: 0 }
     }
 }
 
@@ -718,9 +777,7 @@ pub struct RenderingAttachment {
 impl Default for RenderingAttachment {
     fn default() -> Self {
         Self {
-            image_view: ImageViewID {
-                id: u64::max_value(),
-            },
+            image_view: ImageViewID { id: u64::max_value() },
             image_layout: ImageLayout::Undefined,
             resolve_image_view: None,
             resolve_image_layout: ImageLayout::Undefined,
@@ -745,9 +802,7 @@ impl RenderingFlags {
     pub(crate) const fn to_vk(&self) -> vk::RenderingFlags {
         match self {
             Self::None => vk::RenderingFlags::empty(),
-            Self::ContentsSecondaryCommandBuffers => {
-                vk::RenderingFlags::CONTENTS_SECONDARY_COMMAND_BUFFERS
-            }
+            Self::ContentsSecondaryCommandBuffers => vk::RenderingFlags::CONTENTS_SECONDARY_COMMAND_BUFFERS,
             Self::Suspending => vk::RenderingFlags::SUSPENDING,
             Self::Resuming => vk::RenderingFlags::RESUMING,
         }
@@ -767,11 +822,7 @@ pub struct RenderingBeginInfo {
 impl Default for RenderingBeginInfo {
     fn default() -> Self {
         return Self {
-            render_area: RenderArea {
-                offset: 0,
-                width: 0,
-                height: 0,
-            },
+            render_area: RenderArea { offset: 0, width: 0, height: 0 },
             rendering_flags: RenderingFlags::None,
             view_mask: 0,
             layer_count: 0,
@@ -812,9 +863,7 @@ impl PipelineStage {
             PipelineStage::VertexShader => vk::PipelineStageFlags2::VERTEX_SHADER,
             PipelineStage::FragmentShader => vk::PipelineStageFlags2::FRAGMENT_SHADER,
             PipelineStage::ComputeShader => vk::PipelineStageFlags2::COMPUTE_SHADER,
-            PipelineStage::ColorAttachmentOutput => {
-                vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT
-            }
+            PipelineStage::ColorAttachmentOutput => vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
             PipelineStage::Transfer => vk::PipelineStageFlags2::TRANSFER,
             PipelineStage::AllCommands => vk::PipelineStageFlags2::ALL_COMMANDS,
         }
@@ -859,35 +908,97 @@ impl AccessType {
 }
 
 #[derive(Clone)]
+pub struct MemoryBarrier {
+    pub src_stage: PipelineStage,
+    pub dst_stage: PipelineStage,
+    pub src_access: AccessType,
+    pub dst_access: AccessType,
+}
+
+impl Default for MemoryBarrier {
+    fn default() -> Self {
+        return MemoryBarrier {
+            src_stage: PipelineStage::TopOfPipe,
+            dst_stage: PipelineStage::BottomOfPipe,
+            src_access: AccessType::ColorAttachmentRead,
+            dst_access: AccessType::ColorAttachmentRead,
+        };
+    }
+}
+
+#[derive(Clone)]
+pub struct ImageBarrier {
+    pub image: ImageID,
+    pub aspect: ImageAspect,
+    pub old_layout: ImageLayout,
+    pub new_layout: ImageLayout,
+    pub src_stage: PipelineStage,
+    pub dst_stage: PipelineStage,
+    pub src_access: AccessType,
+    pub dst_access: AccessType,
+    pub src_queue: QueueType,
+    pub dst_queue: QueueType,
+    pub base_mip: u32,
+    pub level_count: u32,
+    pub base_layer: u32,
+    pub layer_count: u32,
+}
+
+impl Default for ImageBarrier {
+    fn default() -> Self {
+        return ImageBarrier {
+            image: ImageID { id: u64::MAX },
+            aspect: ImageAspect::Color,
+            old_layout: ImageLayout::Undefined,
+            new_layout: ImageLayout::Undefined,
+            src_stage: PipelineStage::TopOfPipe,
+            dst_stage: PipelineStage::BottomOfPipe,
+            src_access: AccessType::ColorAttachmentRead,
+            dst_access: AccessType::ColorAttachmentRead,
+            src_queue: QueueType::None,
+            dst_queue: QueueType::None,
+            base_mip: 0,
+            level_count: 1,
+            base_layer: 0,
+            layer_count: 1,
+        };
+    }
+}
+
+#[derive(Clone)]
+pub struct BufferBarrier {
+    pub buffer: BufferID,
+    pub src_stage: PipelineStage,
+    pub dst_stage: PipelineStage,
+    pub src_access: AccessType,
+    pub dst_access: AccessType,
+    pub src_queue: QueueType,
+    pub dst_queue: QueueType,
+    pub offset: u64,
+    pub size: u64,
+}
+
+impl Default for BufferBarrier {
+    fn default() -> Self {
+        return BufferBarrier {
+            buffer: BufferID { id: u64::MAX },
+            src_stage: PipelineStage::TopOfPipe,
+            dst_stage: PipelineStage::BottomOfPipe,
+            src_access: AccessType::ColorAttachmentRead,
+            dst_access: AccessType::ColorAttachmentRead,
+            src_queue: QueueType::None,
+            dst_queue: QueueType::None,
+            offset: 0,
+            size: 0,
+        };
+    }
+}
+
+#[derive(Clone)]
 pub enum Barrier {
-    Memory {
-        src_stage: PipelineStage,
-        dst_stage: PipelineStage,
-        src_access: AccessType,
-        dst_access: AccessType,
-    },
-    Image {
-        image: ImageID,
-        old_layout: ImageLayout,
-        new_layout: ImageLayout,
-        src_stage: PipelineStage,
-        dst_stage: PipelineStage,
-        src_access: AccessType,
-        dst_access: AccessType,
-        base_mip: u32,
-        level_count: u32,
-        base_layer: u32,
-        layer_count: u32,
-    },
-    Buffer {
-        buffer: BufferID,
-        src_stage: PipelineStage,
-        dst_stage: PipelineStage,
-        src_access: AccessType,
-        dst_access: AccessType,
-        offset: u64,
-        size: u64,
-    },
+    Memory(MemoryBarrier),
+    Image(ImageBarrier),
+    Buffer(BufferBarrier),
 }
 
 //Submit info
@@ -899,9 +1010,9 @@ pub struct SemaphoreInfo {
 
 pub struct QueueSubmitInfo {
     pub fence: Option<Fence>,
-    pub command_buffers: SmallVec<[CommandBuffer; 2]>,
-    pub wait_semaphores: SmallVec<[SemaphoreInfo; 2]>,
-    pub signal_semaphores: SmallVec<[SemaphoreInfo; 2]>,
+    pub command_buffers: Vec<ExecutableCommandBuffer>,
+    pub wait_semaphores: Vec<SemaphoreInfo>,
+    pub signal_semaphores: Vec<SemaphoreInfo>,
 }
 
 //// Rasterization pipeline create info ////
@@ -1009,9 +1120,53 @@ impl Default for PipelineOutputs {
     }
 }
 
+#[derive(Clone, Copy)]
+pub struct ShaderStages(pub vk::ShaderStageFlags);
+
+impl ShaderStages {
+    pub const VERTEX: Self = Self(vk::ShaderStageFlags::VERTEX);
+    pub const TESSELLATION_CONTROL: Self = Self(vk::ShaderStageFlags::TESSELLATION_CONTROL);
+    pub const TESSELLATION_EVALUATION: Self = Self(vk::ShaderStageFlags::TESSELLATION_EVALUATION);
+    pub const GEOMETRY: Self = Self(vk::ShaderStageFlags::GEOMETRY);
+    pub const FRAGMENT: Self = Self(vk::ShaderStageFlags::FRAGMENT);
+    pub const COMPUTE: Self = Self(vk::ShaderStageFlags::COMPUTE);
+    pub const ALL_GRAPHICS: Self = Self(vk::ShaderStageFlags::ALL_GRAPHICS);
+    pub const EMPTY: Self = Self(vk::ShaderStageFlags::empty());
+    pub const ALL: Self = Self(vk::ShaderStageFlags::ALL);
+
+    pub fn to_vk(self) -> vk::ShaderStageFlags {
+        self.0
+    }
+}
+
+impl BitOr for ShaderStages {
+    type Output = Self;
+    fn bitor(self, rhs: Self) -> Self {
+        Self(self.0 | rhs.0)
+    }
+}
+
+#[derive(Clone)]
+pub struct PushConstants {
+    pub stage_flags: ShaderStages,
+    pub offset: u32,
+    pub size: u32,
+}
+
+impl Default for PushConstants {
+    fn default() -> Self {
+        return PushConstants {
+            stage_flags: ShaderStages::ALL,
+            offset: 0,
+            size: 0,
+        };
+    }
+}
+
 #[derive(Clone)]
 pub struct RasterizationPipelineDescription {
     pub vertex_input: VertexInputDescription,
+    pub push_constants: PushConstants,
     pub vertex_shader_path: &'static str,
     pub fragment_shader_path: &'static str,
     pub cull_mode: CullMode,
@@ -1026,9 +1181,10 @@ impl Default for RasterizationPipelineDescription {
     fn default() -> Self {
         Self {
             vertex_input: VertexInputDescription::default(),
+            push_constants: PushConstants::default(),
             vertex_shader_path: " ",
             fragment_shader_path: " ",
-            cull_mode: CullMode::Back,
+            cull_mode: CullMode::None,
             front_face: FrontFace::CounterClockwise,
             polygon_mode: PolygonMode::Fill,
             depth_stencil: DepthStencilOptions::default(),
@@ -1036,4 +1192,10 @@ impl Default for RasterizationPipelineDescription {
             outputs: PipelineOutputs::default(),
         }
     }
+}
+
+//// Compute Pipeline create info ////
+pub struct ComputePipelineDescription {
+    pub shader_path: &'static str,
+    pub push_constants: PushConstants,
 }

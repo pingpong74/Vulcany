@@ -1,13 +1,14 @@
-use image::GenericImageView;
+use ahash::{HashMap, HashMapExt};
+use ash::vk;
+use crossbeam::queue::ArrayQueue;
+use smallvec::smallvec;
 
 use crate::{
-    BinarySemaphore, BufferDescription, BufferID, CommandBuffer, CommandBufferLevel, Fence,
-    ImageDescription, ImageID, ImageViewDescription, ImageViewID, PipelineManager, QueueSubmitInfo,
-    QueueType, SamplerDescription, SamplerID, Semaphore, Swapchain, SwapchainDescription,
-    TimelineSemaphore,
+    BinarySemaphore, BufferDescription, BufferID, BufferWriteInfo, CommandRecorder, Fence, ImageDescription, ImageID, ImageViewDescription, ImageViewID, ImageWriteInfo, PipelineManager,
+    QueueSubmitInfo, QueueType, SamplerWriteInfo, Semaphore, Swapchain, SwapchainDescription, TimelineSemaphore,
     backend::{device::InnerDevice, pipelines::InnerPipelineManager, swapchain::InnerSwapchain},
 };
-use std::sync::{Arc, Mutex, atomic::AtomicUsize};
+use std::sync::{Arc, atomic::AtomicUsize};
 
 #[derive(Clone)]
 pub struct Device {
@@ -17,38 +18,60 @@ pub struct Device {
 //Swapchain Impl//
 impl Device {
     pub fn create_swapchain(&self, swapchain_desc: &SwapchainDescription) -> Swapchain {
-        let (loader, swapchain, images, image_views) = self
-            .inner
-            .create_swapchain_data(swapchain_desc, ash::vk::SwapchainKHR::null());
+        let (loader, swapchain, images, image_views) = self.inner.create_swapchain_data(swapchain_desc, ash::vk::SwapchainKHR::null());
+
+        let (image_semapgores, present_semaphore) = {
+            let mut t: Vec<Semaphore> = vec![];
+            let mut n: Vec<Semaphore> = vec![];
+
+            for _ in 0..swapchain_desc.image_count {
+                t.push(self.create_binary_semaphore());
+                n.push(self.create_binary_semaphore());
+            }
+
+            (t, n)
+        };
 
         return Swapchain {
             inner: Arc::new(InnerSwapchain {
                 handle: swapchain,
                 swapchain_loader: loader,
-                curr_img_index: AtomicUsize::new(0),
+                curr_img_indeices: ArrayQueue::new(swapchain_desc.image_count as usize),
                 image_views: image_views,
                 images: images,
+                image_semaphore: image_semapgores,
+                preset_semaphore: present_semaphore,
+                timeline: AtomicUsize::new(0),
                 device: self.inner.clone(),
             }),
         };
     }
 
-    pub fn recreate_swapchain(
-        &self,
-        swapchain_desc: &SwapchainDescription,
-        old_swapchain: &Swapchain,
-    ) -> Swapchain {
-        let (loader, swapchain, images, image_views) = self
-            .inner
-            .create_swapchain_data(swapchain_desc, old_swapchain.inner.handle);
+    pub fn recreate_swapchain(&self, swapchain_desc: &SwapchainDescription, old_swapchain: &Swapchain) -> Swapchain {
+        let (loader, swapchain, images, image_views) = self.inner.create_swapchain_data(swapchain_desc, old_swapchain.inner.handle);
+
+        let (image_semapgores, present_semaphore) = {
+            let mut t: Vec<Semaphore> = vec![];
+            let mut n: Vec<Semaphore> = vec![];
+
+            for _ in 0..swapchain_desc.image_count {
+                t.push(self.create_binary_semaphore());
+                n.push(self.create_binary_semaphore());
+            }
+
+            (t, n)
+        };
 
         return Swapchain {
             inner: Arc::new(InnerSwapchain {
                 handle: swapchain,
                 swapchain_loader: loader,
-                curr_img_index: AtomicUsize::new(0),
+                curr_img_indeices: ArrayQueue::new(swapchain_desc.image_count as usize),
                 image_views: image_views,
                 images: images,
+                image_semaphore: image_semapgores,
+                preset_semaphore: present_semaphore,
+                timeline: AtomicUsize::new(0),
                 device: self.inner.clone(),
             }),
         };
@@ -83,11 +106,7 @@ impl Device {
 
 // Image View //
 impl Device {
-    pub fn create_image_view(
-        &self,
-        image_id: ImageID,
-        image_view_desc: &ImageViewDescription,
-    ) -> ImageViewID {
+    pub fn create_image_view(&self, image_id: ImageID, image_view_desc: &ImageViewDescription) -> ImageViewID {
         return self.inner.create_image_view(image_id, image_view_desc);
     }
 
@@ -96,17 +115,29 @@ impl Device {
     }
 }
 
+impl Device {
+    pub fn write_buffer(&self, buffer_write_info: &BufferWriteInfo) {
+        self.inner.write_buffer(buffer_write_info);
+    }
+
+    pub fn write_image(&self, image_write_info: &ImageWriteInfo) {
+        self.inner.write_image(image_write_info);
+    }
+
+    pub fn write_sampler(&self, sampler_write_info: &SamplerWriteInfo) {
+        self.inner.write_sampler(sampler_write_info);
+    }
+}
+
 // Pipeline Manager //
 impl Device {
     pub fn create_pipeline_manager(&self, shader_directory: &str) -> PipelineManager {
-        let (pool, set, layout) = self.inner.create_pipeline_manager_data(shader_directory);
+        InnerPipelineManager::compile_shaders_in_dir(shader_directory);
 
         return PipelineManager {
             inner: Arc::new(InnerPipelineManager {
                 shader_directory: shader_directory.to_string(),
-                desc_pool: pool,
-                desc_layout: layout,
-                desc_set: set,
+                desc_layout: self.inner.bindless_descriptors.layout,
                 device: self.inner.clone(),
             }),
         };
@@ -115,24 +146,18 @@ impl Device {
 
 // Command buffer //
 impl Device {
-    pub fn allocate_command_buffer(
-        &self,
-        level: CommandBufferLevel,
-        queue_type: QueueType,
-    ) -> CommandBuffer {
-        return CommandBuffer {
-            handle: self.inner.allocate_command_buffers(level, queue_type),
-            queue_type,
+    pub fn create_command_recorder(&self, queue_type: QueueType) -> CommandRecorder {
+        return CommandRecorder {
+            handle: self.inner.createcmd_recorder_data(queue_type),
+            commad_buffers: smallvec![],
+            exec_command_buffers: smallvec![],
+            current_commad_buffer: vk::CommandBuffer::null(),
+            queue_type: queue_type,
+            remembered_image_ids: HashMap::new(),
+            remembered_buffer_ids: HashMap::new(),
+            remembered_image_view_ids: HashMap::new(),
             device: self.inner.clone(),
         };
-    }
-
-    pub fn free_command_buffer(&self, cmd_buffer: CommandBuffer) {
-        self.inner.free_command_buffer(cmd_buffer);
-    }
-
-    pub fn reset_command_pool(&self, queue_type: QueueType) {
-        self.inner.reset_command_pool(queue_type);
     }
 }
 

@@ -1,72 +1,58 @@
 use ash::vk;
+use crossbeam::queue::ArrayQueue;
+use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
-use std::sync::{Arc, Mutex};
 
-use crate::{Fence, ImageID, ImageViewID, Semaphore, Swapchain, SwapchainDescription};
+use crate::{ImageID, ImageViewID, Semaphore};
 
 use crate::backend::device::InnerDevice;
 
 pub(crate) struct InnerSwapchain {
     pub(crate) swapchain_loader: ash::khr::swapchain::Device,
     pub(crate) handle: vk::SwapchainKHR,
-    pub(crate) curr_img_index: AtomicUsize,
+    pub(crate) curr_img_indeices: ArrayQueue<u32>,
     pub(crate) images: Vec<ImageID>,
     pub(crate) image_views: Vec<ImageViewID>,
+    pub(crate) image_semaphore: Vec<Semaphore>,
+    pub(crate) preset_semaphore: Vec<Semaphore>,
+    pub(crate) timeline: AtomicUsize,
     pub(crate) device: Arc<InnerDevice>,
 }
 
 impl InnerSwapchain {
-    pub(crate) fn acquire_image(
-        &self,
-        signal_semaphore: Option<&Semaphore>,
-        signal_fence: Option<&Fence>,
-    ) -> (ImageID, ImageViewID) {
-        let acquire_info = vk::AcquireNextImageInfoKHR::default()
-            .swapchain(self.handle)
-            .timeout(u64::MAX)
-            .semaphore(if signal_semaphore.is_some() {
-                signal_semaphore.unwrap().handle()
-            } else {
-                vk::Semaphore::null()
-            })
-            .fence(if signal_fence.is_some() {
-                signal_fence.unwrap().handle
-            } else {
-                vk::Fence::null()
-            })
-            .device_mask(1);
+    pub(crate) fn acquire_image(&self) -> (ImageID, ImageViewID, Semaphore, Semaphore) {
+        let timeline_index = self.timeline.load(std::sync::atomic::Ordering::Relaxed);
+        let sem = self.image_semaphore[timeline_index];
 
-        let (index, _) = unsafe {
-            self.swapchain_loader
-                .acquire_next_image2(&acquire_info)
-                .expect("Failed to acquire next image")
-        };
+        let acquire_info = vk::AcquireNextImageInfoKHR::default().swapchain(self.handle).timeout(u64::MAX).semaphore(sem.handle()).device_mask(1);
 
-        self.curr_img_index
-            .store(index as usize, std::sync::atomic::Ordering::SeqCst);
+        let next_timeline_index = (timeline_index + 1) % self.image_semaphore.len();
+        self.timeline.store(next_timeline_index, std::sync::atomic::Ordering::Relaxed);
 
-        return (
-            self.images[index as usize],
-            self.image_views[index as usize],
-        );
+        let (index, _) = unsafe { self.swapchain_loader.acquire_next_image2(&acquire_info).expect("Failed to acquire next image") };
+
+        self.curr_img_indeices.push(index);
+
+        //println!("{} {}", timeline_index, index);
+
+        return (self.images[index as usize], self.image_views[index as usize], sem, self.preset_semaphore[index as usize]);
     }
 
-    pub(crate) fn present(&self, sempahores: &[Semaphore]) {
+    pub(crate) fn present(&self) {
+        let index = match self.curr_img_indeices.pop() {
+            Some(i) => i,
+            _ => {
+                return;
+            }
+        };
+        let sem = [self.preset_semaphore[index as usize].handle()];
         let handle = [self.handle];
-        let index = [self
-            .curr_img_index
-            .load(std::sync::atomic::Ordering::SeqCst) as u32];
-        let sem: Vec<vk::Semaphore> = sempahores.into_iter().map(|s| s.handle()).collect();
+        let index = [index];
 
-        let present_info = vk::PresentInfoKHR::default()
-            .swapchains(&handle)
-            .image_indices(&index)
-            .wait_semaphores(&sem);
+        let present_info = vk::PresentInfoKHR::default().swapchains(&handle).image_indices(&index).wait_semaphores(&sem);
 
         unsafe {
-            self.swapchain_loader
-                .queue_present(self.device.graphics_queue, &present_info)
-                .expect("Failed to preset image!!");
+            self.swapchain_loader.queue_present(self.device.graphics_queue, &present_info).expect("Failed to preset image!!");
         }
     }
 }
@@ -74,11 +60,7 @@ impl InnerSwapchain {
 impl Drop for InnerSwapchain {
     fn drop(&mut self) {
         for i in 0..self.image_views.len() {
-            self.device
-                .image_pool
-                .write()
-                .unwrap()
-                .delete(self.images[i].id);
+            self.device.image_pool.write().unwrap().delete(self.images[i].id);
 
             self.device.destroy_image_view(self.image_views[i]);
         }
