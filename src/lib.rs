@@ -9,6 +9,8 @@ pub use core::{commands::*, device::*, gpu_resources::*, instance::*, pipelines:
 pub use definations::{commands::*, core::*, gpu_resources::*, pipelines::*};
 pub use taskgraph::{definations::*, task_graph::*};
 
+pub use bytemuck;
+
 //Macros here
 //
 // Vertex macro
