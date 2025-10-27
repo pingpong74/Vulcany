@@ -175,9 +175,11 @@ impl InnerPipelineManager {
         let pipeline_layout = unsafe { self.device.handle.create_pipeline_layout(&layout_info, None).expect("Failed to create pipeline layout") };
 
         //Vertex inpput
+
+        let (vertex_input_binding, vertex_input_attributes) = raster_pipeline_desc.vertex_input.to_vk();
         let vertex_input_state = vk::PipelineVertexInputStateCreateInfo::default()
-            .vertex_binding_descriptions(&raster_pipeline_desc.vertex_input.bindings)
-            .vertex_attribute_descriptions(&raster_pipeline_desc.vertex_input.attributes);
+            .vertex_binding_descriptions(&vertex_input_binding)
+            .vertex_attribute_descriptions(&vertex_input_attributes);
 
         //Brrr
         let input_assembly = vk::PipelineInputAssemblyStateCreateInfo::default()

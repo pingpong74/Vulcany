@@ -7,9 +7,9 @@ use std::sync::Arc;
 const FRAME_IN_FLIGHT: usize = 3;
 
 vertex!(MyVertex {
-    input_rate: VERTEX,
-    pos: [f32; 2] => { location: 0, format: R32G32_SFLOAT },
-    color: [f32; 3] => { location: 1, format: R32G32B32_SFLOAT },
+    input_rate: Vertex,
+    pos: [f32; 2],
+    color: [f32; 3],
 });
 
 struct FrameData {

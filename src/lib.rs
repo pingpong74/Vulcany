@@ -1,11 +1,12 @@
 pub(crate) mod backend;
 
 pub mod core;
+pub mod definations;
 pub mod taskgraph;
 pub mod utils;
 
-pub use core::{commands::*, definations::*, device::*, gpu_resources::*, instance::*, pipelines::*, swapchain::*};
-
+pub use core::{commands::*, device::*, gpu_resources::*, instance::*, pipelines::*, swapchain::*};
+pub use definations::{commands::*, core::*, gpu_resources::*, pipelines::*};
 pub use taskgraph::{definations::*, task_graph::*};
 
 //Macros here
@@ -17,7 +18,7 @@ macro_rules! vertex {
     (
         $name:ident {
             input_rate: $rate:ident,
-            $( $field:ident : $ty:ty => { location: $loc:expr, format: $fmt:ident } ),* $(,)?
+            $( $field:ident : $ty:ty ),* $(,)?
         }
     ) => {
         #[repr(C)]
@@ -27,25 +28,30 @@ macro_rules! vertex {
         }
 
         impl $name {
-            fn vertex_input_description() -> $crate::VertexInputDescription {
+            pub fn vertex_input_description() -> $crate::VertexInputDescription {
+                use std::mem;
+                let mut location = 0u32;
+
+                let mut attributes = Vec::new();
+                $(
+                    attributes.push($crate::VertexAttribute {
+                        location,
+                        binding: 0,
+                        format: <$ty as $crate::VertexFormat>::FORMAT,
+                        offset: memoffset::offset_of!($name, $field) as u32,
+                    });
+                    location += 1;
+                )*
+
                 $crate::VertexInputDescription {
                     bindings: vec![
-                        ash::vk::VertexInputBindingDescription {
+                        $crate::VertexBinding {
                             binding: 0,
-                            stride: std::mem::size_of::<Self>() as u32,
-                            input_rate: ash::vk::VertexInputRate::$rate,
+                            stride: mem::size_of::<Self>() as u32,
+                            input_rate: $crate::VertexInputRate::$rate,
                         }
                     ],
-                    attributes: vec![
-                        $(
-                            ash::vk::VertexInputAttributeDescription {
-                                location: $loc,
-                                binding: 0,
-                                format: ash::vk::Format::$fmt,
-                                offset: memoffset::offset_of!($name, $field) as u32,
-                            }
-                        ),*
-                    ],
+                    attributes,
                 }
             }
         }

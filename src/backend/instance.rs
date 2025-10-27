@@ -1,7 +1,4 @@
-use crate::{
-    ApiVersion,
-    core::{definations::DeviceDescription, definations::InstanceDescription},
-};
+use crate::{ApiVersion, DeviceDescription, InstanceDescription};
 
 use ash::vk;
 //use image::imageops::FilterType::Triangle;

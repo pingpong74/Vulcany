@@ -4,7 +4,6 @@ use crate::{
     backend::{
         gpu_resources::{BufferSlot, GpuBindlessDescriptorPool, GpuResourcePool, ImageSlot, ImageViewSlot, SamplerSlot},
         instance::InnerInstance,
-        pipelines::InnerPipelineManager,
     },
 };
 
@@ -196,7 +195,7 @@ impl InnerDevice {
             .array_layers(image_desc.array_layers)
             .mip_levels(image_desc.mip_levels)
             .initial_layout(vk::ImageLayout::UNDEFINED)
-            .image_type(vk::ImageType::TYPE_2D)
+            .image_type(image_desc.image_type.to_vk())
             .samples(image_desc.samples.to_vk_flags())
             .tiling(vk::ImageTiling::OPTIMAL);
 

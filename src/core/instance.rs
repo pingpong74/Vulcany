@@ -5,10 +5,9 @@ use crate::backend::{
 };
 use std::sync::{Arc, RwLock};
 
-use super::{
-    definations::{DeviceDescription, InstanceDescription},
-    device::Device,
-};
+use super::device::Device;
+
+use crate::{DeviceDescription, InstanceDescription};
 
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 

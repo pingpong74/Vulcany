@@ -1,6 +1,4 @@
 pub mod commands;
-pub mod device;
+pub mod core;
 pub mod gpu_resources;
-pub mod instance;
 pub mod pipelines;
-pub mod swapchain;
