@@ -1,0 +1,26 @@
+[package]
+name = "vulcany"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+keywords = ["graphics", "vulkan"]
+exclude = ["/examples", "/.cache"]
+description = "A high performance vulkan abstraction layer"
+readme = "Readme.md"
+repository = "https://github.com/pingpong74/Vulcany"
+
+[dependencies]
+ash = { version = "*", features = ["linked"] }
+vk-mem = { git = "https://github.com/pingpong74/vk-mem-rs", branch = "master" }
+delegate = "*"
+raw-window-handle = "*"
+bytemuck = {version = "*", features = ["derive"], public = true}
+memoffset = "*"
+smallvec = "*"
+serde = {version = "*", features = ["derive"]}
+serde_json = "*"
+ahash = "*"
+crossbeam = "*"
+
+[dev-dependencies]
+winit = "*"
