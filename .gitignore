@@ -1,5 +1,5 @@
 target
 vulcany/target
 vulcany/rustfmt.toml
-vulcany/Cargo.lock
-vulcany_examples/triangle/Cargo.lock
+vulcany_examples/triangle/.cache
+vulcany_examples/fractal/.cache

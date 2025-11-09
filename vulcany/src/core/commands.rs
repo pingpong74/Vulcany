@@ -187,7 +187,7 @@ impl CommandRecorder {
         }
     }
 
-    pub fn set_push_constants<T: bytemuck::Pod>(&self, push_constants: &T, pipeline: Pipeline) {
+    pub fn set_push_constants<T: bytemuck::Pod>(&self, push_constants: &T, pipeline: &Pipeline) {
         let data = bytemuck::bytes_of(push_constants);
         unsafe {
             self.device

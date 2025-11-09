@@ -5,7 +5,7 @@ use smallvec::smallvec;
 
 use crate::{
     BinarySemaphore, BufferDescription, BufferID, BufferWriteInfo, CommandRecorder, Fence, ImageDescription, ImageID, ImageViewDescription, ImageViewID, ImageWriteInfo, PipelineManager,
-    QueueSubmitInfo, QueueType, SamplerWriteInfo, Semaphore, Swapchain, SwapchainDescription, TimelineSemaphore,
+    QueueSubmitInfo, QueueType, SamplerDescription, SamplerID, SamplerWriteInfo, Semaphore, Swapchain, SwapchainDescription, TimelineSemaphore,
     backend::{device::InnerDevice, pipelines::InnerPipelineManager, swapchain::InnerSwapchain},
 };
 use std::sync::{Arc, atomic::AtomicUsize};
@@ -112,6 +112,17 @@ impl Device {
 
     pub fn destroy_image_view(&self, image_view_id: ImageViewID) {
         self.inner.destroy_image_view(image_view_id);
+    }
+}
+
+// Sampler //
+impl Device {
+    pub fn create_sampler(&self, sampler_desc: &SamplerDescription) -> SamplerID {
+        return self.inner.create_sampler(sampler_desc);
+    }
+
+    pub fn destroy_sampler(&self, sampler_id: SamplerID) {
+        self.inner.destroy_sampler(sampler_id);
     }
 }
 

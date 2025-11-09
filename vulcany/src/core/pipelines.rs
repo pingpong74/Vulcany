@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::{
-    RasterizationPipelineDescription,
+    ComputePipelineDescription, RasterizationPipelineDescription,
     backend::pipelines::{InnerComputePipeline, InnerPipelineManager, InnerRasterizationPipeline},
 };
 
@@ -20,7 +20,9 @@ impl PipelineManager {
         }));
     }
 
-    pub fn create_compute_pipeline() {}
+    pub fn create_compute_pipeline(&self, compute_pipeline_desc: &ComputePipelineDescription) -> Pipeline {
+        unimplemented!()
+    }
 }
 
 pub enum Pipeline {

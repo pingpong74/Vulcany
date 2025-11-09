@@ -1,10 +1,10 @@
 [package]
-name = "triangle"
+name = "fractal"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
 winit = "*"
 bytemuck = "*"
-glam = "*"
 vulcany = { path = "../../vulcany"}
+cgmath = "*"

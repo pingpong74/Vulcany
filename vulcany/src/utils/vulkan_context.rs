@@ -1,12 +1,13 @@
 use crate::*;
 use delegate::delegate;
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
-use std::ops::Deref;
 
 pub struct VulkanContext {
     instance: Instance,
     device: Device,
     swapchain: Swapchain,
+    pipeline_manager: PipelineManager,
+    swapchain_description: SwapchainDescription,
 }
 
 impl VulkanContext {
@@ -14,26 +15,27 @@ impl VulkanContext {
         let instance = Instance::new(instance_desc);
         let device = instance.create_device(device_desc);
         let swapchain = device.create_swapchain(swapchain_desc);
+        let pipeline_manager = device.create_pipeline_manager();
 
         return VulkanContext {
             instance: instance,
             device: device,
             swapchain: swapchain,
+            pipeline_manager: pipeline_manager,
+            swapchain_description: swapchain_desc.clone(),
         };
     }
 }
 
 impl VulkanContext {
     pub fn resize(&mut self, width: u32, height: u32) {
-        self.device.wait_idle();
-        let new_swapchain = self.device.recreate_swapchain(
-            &SwapchainDescription {
-                image_count: 3,
-                width: width,
-                height: height,
-            },
-            &self.swapchain,
-        );
+        self.wait_idle();
+        let d = SwapchainDescription {
+            width: width,
+            height: height,
+            image_count: self.swapchain_description.image_count,
+        };
+        let new_swapchain = self.device.recreate_swapchain(&d, &self.swapchain);
         let old_swapchain = std::mem::replace(&mut self.swapchain, new_swapchain);
         drop(old_swapchain);
     }
@@ -42,8 +44,45 @@ impl VulkanContext {
 impl VulkanContext {
     delegate! {
         to self.device {
+            //Buffer
             pub fn create_buffer(&self, buffer_desc: &BufferDescription) -> BufferID;
             pub fn destroy_buffer(&self, id: BufferID);
+            pub fn write_data_to_buffer<T: Copy>(&self, buffer_id: BufferID, data: &[T]);
+            //Image
+            pub fn create_image(&self, image_desc: &ImageDescription) -> ImageID;
+            pub fn destroy_image(&self, image_id: ImageID);
+            //Image view
+            pub fn create_image_view(&self, image_id: ImageID, image_view_desc: &ImageViewDescription) -> ImageViewID;
+            pub fn destroy_image_view(&self, image_view_id: ImageViewID);
+            //Sampler
+            pub fn create_sampler(&self, sampler_desc: &SamplerDescription) -> SamplerID;
+            pub fn destroy_sampler(&self, sampler_id: SamplerID);
+            // Descriptors
+            pub fn write_buffer(&self, buffer_write_info: &BufferWriteInfo);
+            pub fn write_image(&self, image_write_info: &ImageWriteInfo);
+            pub fn write_sampler(&self, sampler_write_info: &SamplerWriteInfo);
+            // Command buffer
+            pub fn create_command_recorder(&self, queue_type: QueueType) -> CommandRecorder;
+            // Sync
+            pub fn create_fence(&self, signaled: bool) -> Fence;
+            pub fn create_binary_semaphore(&self) -> Semaphore;
+            pub fn create_timeline_semaphore(&self) -> Semaphore;
+            pub fn wait_fence(&self, fence: Fence);
+            pub fn reset_fence(&self, fence: Fence);
+            pub fn destroy_fence(&self, fence: Fence);
+            pub fn destroy_semaphore(&self, semaphore: Semaphore);
+            // Queue submissions
+            pub fn submit(&self, submit_info: &QueueSubmitInfo);
+            pub fn wait_idle(&self);
+            pub fn wait_queue(&self, queue_type: QueueType);
+        }
+        to self.swapchain {
+            pub fn acquire_image(&self) -> (ImageID, ImageViewID, Semaphore, Semaphore);
+            pub fn present(&self);
+        }
+        to self.pipeline_manager {
+            pub fn create_rasterization_pipeline(&self, raster_pipeline_desc: &RasterizationPipelineDescription) -> Pipeline;
+            pub fn create_compute_pipeline(&self, compute_pipeline_desc: &ComputePipelineDescription) -> Pipeline;
         }
     }
 }

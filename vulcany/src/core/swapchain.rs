@@ -1,7 +1,7 @@
 use super::instance::Instance;
 use std::sync::Arc;
 
-use crate::{Fence, ImageID, ImageViewID, Semaphore, SwapchainDescription, backend::swapchain::InnerSwapchain};
+use crate::{ImageID, ImageViewID, Semaphore, backend::swapchain::InnerSwapchain};
 
 /// Swapchain abstraction
 /// Contains image and present semaphores internally.

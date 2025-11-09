@@ -1,0 +1,9 @@
+
+static const float4 vertex_pos[3] = { float4(-1.0, -1.0, 0.0, 1.0),
+                                      float4(3.0, -1.0, 0.0, 1.0),
+                                      float4(-1.0, 3.0, 0.0, 1.0) };
+
+[shader("vertex")]
+float4 main(uint vertex_id: SV_VertexID) : SV_Position {
+  return vertex_pos[vertex_id];
+}
