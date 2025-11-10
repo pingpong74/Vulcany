@@ -4,6 +4,7 @@ struct PushConstants {
   float3 pos;
   uint width;
   uint height;
+  float32_t time;
 };
 
 [[vk_push_constant]]
@@ -23,12 +24,13 @@ float3 ray_direction(float2 fragCoord, float2 resolution) {
 }
 
 float mandelbulbDE(float3 p) {
-  float Power = 8.0;
+  float Power = 7.0+ 1.5 * sin(pc.time * 0.75 + p.y * 0.75);
   float dr = 1.0;
   float r = length(p);
 
   float3 z = p;
   for (int i = 0; i < 8; i++) {
+
     r = length(z);
     if (r > 4.0)
       break;
@@ -59,6 +61,7 @@ float trace(float3 ro, float3 rd) {
   for (int i = 0; i < MAX_STEPS; i++) {
     float3 p = ro + rd * totalDist;
     float d = mandelbulbDE(p);
+
     if (d < SURF_DIST)
       return totalDist;
     totalDist += d;

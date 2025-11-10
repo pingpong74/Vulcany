@@ -18,6 +18,7 @@ struct MyPushConstants {
     pos: [f32; 3],
     width: u32,
     height: u32,
+    time: f32,
 }
 
 pub struct Renderer {
@@ -34,7 +35,7 @@ impl Renderer {
         let vk_context = VulkanContext::new(
             &InstanceDescription {
                 api_version: ApiVersion::VkApi1_3,
-                enable_validation_layers: true,
+                enable_validation_layers: false,
                 window: window.clone(),
             },
             &DeviceDescription {
@@ -43,8 +44,8 @@ impl Renderer {
             },
             &SwapchainDescription {
                 image_count: 3,
-                width: window.inner_size().width,
-                height: window.inner_size().height,
+                width: size.width,
+                height: size.height,
             },
         );
 
@@ -84,16 +85,19 @@ impl Renderer {
         self.vk_context.resize(width, height);
     }
 
-    pub fn render(&mut self, camera: &Camera, size: PhysicalSize<u32>) {
+    pub fn render(&mut self, camera: &Camera, time: f32, size: PhysicalSize<u32>) {
         let push_constants = MyPushConstants {
             view_proj_mat: camera.get_inv_view_proj(),
             pos: camera.get_pos(),
             width: size.width,
             height: size.height,
+            time: time,
         };
 
         self.vk_context
             .wait_fence(self.frame_data[self.curr_frame].fence);
+        self.vk_context
+            .reset_fence(self.frame_data[self.curr_frame].fence);
 
         let (img, img_view, image_semaphore, present_semaphore) = self.vk_context.acquire_image();
 

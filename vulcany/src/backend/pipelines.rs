@@ -343,6 +343,7 @@ impl InnerPipelineManager {
 pub(crate) struct InnerRasterizationPipeline {
     pub(crate) handle: vk::Pipeline,
     pub(crate) layout: vk::PipelineLayout,
+    pub(crate) desc: RasterizationPipelineDescription,
     pub(crate) manager: Arc<InnerPipelineManager>,
 }
 

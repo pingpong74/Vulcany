@@ -173,12 +173,15 @@ impl InnerInstance {
 
         let mut buffer_device_address = vk::PhysicalDeviceBufferDeviceAddressFeatures::default().buffer_device_address(true);
 
+        let mut vk_features_11 = vk::PhysicalDeviceVulkan11Features::default().shader_draw_parameters(true);
+
         let mut features2 = vk::PhysicalDeviceFeatures2::default()
             .push_next(&mut indexing_features)
             .push_next(&mut dynamic_rendering_features)
             .push_next(&mut sync2)
             .push_next(&mut timeline_sem)
             .push_next(&mut buffer_device_address)
+            .push_next(&mut vk_features_11)
             .features(features);
 
         let create_info = vk::DeviceCreateInfo::default()

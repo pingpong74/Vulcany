@@ -19,6 +19,7 @@ struct Application {
     renderer: Renderer,
     camera_controller: CameraController,
     camera: Camera,
+    time: f32,
 }
 
 impl Application {
@@ -36,6 +37,7 @@ impl Application {
             renderer: Renderer::new(window.clone()),
             camera_controller: CameraController::new(1.0, 0.7),
             camera: Camera::new(size.width, size.height),
+            time: 0.0,
         };
     }
 }
@@ -60,10 +62,12 @@ impl ApplicationHandler for Application {
             }
             WindowEvent::RedrawRequested => {
                 let start = Instant::now();
-                self.renderer.render(&self.camera, self.window.inner_size());
+                self.renderer
+                    .render(&self.camera, self.time, self.window.inner_size());
                 let duration = start.elapsed();
                 self.camera_controller
                     .update_camera(&mut self.camera, duration.as_secs_f32());
+                self.time += duration.as_secs_f32();
                 //println!("{}", duration.as_millis());
 
                 self.window.request_redraw();

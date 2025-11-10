@@ -192,7 +192,7 @@ impl CommandRecorder {
         unsafe {
             self.device
                 .handle
-                .cmd_push_constants(self.current_commad_buffer, pipeline.get_layout(), vk::ShaderStageFlags::ALL, 0, data);
+                .cmd_push_constants(self.current_commad_buffer, pipeline.get_layout(), pipeline.get_push_const_shader_stage(), 0, data);
         }
     }
 

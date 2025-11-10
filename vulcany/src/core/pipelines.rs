@@ -16,6 +16,7 @@ impl PipelineManager {
         return Pipeline::RasterizationPipeline(Arc::new(InnerRasterizationPipeline {
             handle: pipeline,
             layout: layout,
+            desc: raster_pipeline_desc.clone(),
             manager: self.inner.clone(),
         }));
     }
@@ -42,6 +43,13 @@ impl Pipeline {
         match self {
             Pipeline::RasterizationPipeline(inner) => inner.layout,
             Pipeline::ComputePipeline(inner) => inner.layout,
+        }
+    }
+
+    pub(crate) fn get_push_const_shader_stage(&self) -> ash::vk::ShaderStageFlags {
+        match self {
+            Pipeline::RasterizationPipeline(inner) => inner.desc.push_constants.stage_flags.to_vk(),
+            _ => !unimplemented!(),
         }
     }
 }
