@@ -23,11 +23,12 @@ pub(crate) struct QueueFamilyIndices {
     pub compute_family: Option<u32>,
 }
 
-pub(crate) struct PhysicalDevice {
+pub(crate) struct PhysicalDevice<'a> {
     pub handle: vk::PhysicalDevice,
     pub swapchain_support: SwapchainSupport,
     pub queue_families: QueueFamilyIndices,
-    pub properties: vk::PhysicalDeviceProperties,
+    pub properties: vk::PhysicalDeviceProperties2<'a>,
+    pub rt_props: vk::PhysicalDeviceRayTracingPipelinePropertiesKHR<'a>,
 }
 
 pub(crate) struct InnerInstance {
@@ -119,7 +120,7 @@ impl InnerInstance {
         };
     }
 
-    pub(crate) fn create_device_data(&self, _device_create_info: &DeviceDescription) -> (ash::Device, PhysicalDevice, vk_mem::Allocator) {
+    pub(crate) fn create_device_data(&self, device_desc: &DeviceDescription) -> (ash::Device, PhysicalDevice, vk_mem::Allocator) {
         let physical_device = {
             let dev = self.select_physical_device();
             if dev.is_none() {
@@ -149,8 +150,9 @@ impl InnerInstance {
             .collect();
 
         // Required device extensions (swapchain needed for presentation)
-        let device_extensions = vec![ash::khr::swapchain::NAME.as_ptr(), ash::khr::synchronization2::NAME.as_ptr()];
+        let mut device_extensions = vec![ash::khr::swapchain::NAME.as_ptr(), ash::khr::synchronization2::NAME.as_ptr()];
 
+        // Existing common features
         let features = vk::PhysicalDeviceFeatures::default().shader_int64(true);
 
         let mut dynamic_rendering_features = vk::PhysicalDeviceDynamicRenderingFeatures::default().dynamic_rendering(true);
@@ -168,13 +170,30 @@ impl InnerInstance {
             .descriptor_binding_uniform_texel_buffer_update_after_bind(true);
 
         let mut sync2 = vk::PhysicalDeviceSynchronization2Features::default().synchronization2(true);
-
         let mut timeline_sem = vk::PhysicalDeviceTimelineSemaphoreFeatures::default().timeline_semaphore(true);
-
         let mut buffer_device_address = vk::PhysicalDeviceBufferDeviceAddressFeatures::default().buffer_device_address(true);
-
         let mut vk_features_11 = vk::PhysicalDeviceVulkan11Features::default().shader_draw_parameters(true);
 
+        // ----> CONDITIONAL RAY TRACING ADDITIONS <----
+        let mut accel_struct_features = vk::PhysicalDeviceAccelerationStructureFeaturesKHR::default();
+        let mut rt_pipeline_features = vk::PhysicalDeviceRayTracingPipelineFeaturesKHR::default();
+        let mut ray_query_features = vk::PhysicalDeviceRayQueryFeaturesKHR::default();
+
+        if device_desc.ray_tracing {
+            // Add RT extensions
+            device_extensions.push(ash::khr::acceleration_structure::NAME.as_ptr());
+            device_extensions.push(ash::khr::ray_tracing_pipeline::NAME.as_ptr());
+            device_extensions.push(ash::khr::deferred_host_operations::NAME.as_ptr());
+
+            // Enable the Vulkan features
+            accel_struct_features = accel_struct_features.acceleration_structure(true);
+            rt_pipeline_features = rt_pipeline_features.ray_tracing_pipeline(true);
+
+            // Optional: RT queries inside shaders
+            ray_query_features = ray_query_features.ray_query(true);
+        }
+
+        // ----> Build final feature2 chain <----
         let mut features2 = vk::PhysicalDeviceFeatures2::default()
             .push_next(&mut indexing_features)
             .push_next(&mut dynamic_rendering_features)
@@ -183,6 +202,11 @@ impl InnerInstance {
             .push_next(&mut buffer_device_address)
             .push_next(&mut vk_features_11)
             .features(features);
+
+        // Add ray tracing feature structs *only if* enabled
+        if device_desc.ray_tracing {
+            features2 = features2.push_next(&mut accel_struct_features).push_next(&mut rt_pipeline_features).push_next(&mut ray_query_features);
+        }
 
         let create_info = vk::DeviceCreateInfo::default()
             .queue_create_infos(&queue_infos)
@@ -343,7 +367,11 @@ impl InnerInstance {
         let mut best_device: Option<(i32, PhysicalDevice)> = None;
 
         for device in devices {
-            let props = unsafe { self.handle.get_physical_device_properties(device) };
+            let mut rt_props: vk::PhysicalDeviceRayTracingPipelinePropertiesKHR = Default::default();
+            let mut props: vk::PhysicalDeviceProperties2 = vk::PhysicalDeviceProperties2::default().push_next(&mut rt_props);
+            unsafe {
+                self.handle.get_physical_device_properties2(device, &mut props);
+            };
 
             if let (Some(sc), Some(qf)) = (self.get_swapchain_support(device), self.get_queue_families(device)) {
                 if !self.check_device_extension_support(device) {
@@ -351,20 +379,24 @@ impl InnerInstance {
                 }
 
                 // Score device: discrete = 1000, integrated = 100, others = 10
-                let score = match props.device_type {
+                let score = match props.properties.device_type {
                     ash::vk::PhysicalDeviceType::DISCRETE_GPU => 1000,
                     ash::vk::PhysicalDeviceType::INTEGRATED_GPU => 100,
                     _ => 10,
                 };
 
                 // Prefer larger max image dimension as tiebreaker
-                let score = score + props.limits.max_image_dimension2_d as i32;
+                let score = score + props.properties.limits.max_image_dimension2_d as i32;
+
+                let owned_props = props; // Copy, no pNext
+                let owned_rt_props = rt_props;
 
                 let candidate = PhysicalDevice {
                     handle: device,
                     swapchain_support: sc,
                     queue_families: qf,
-                    properties: props,
+                    properties: owned_props,
+                    rt_props: owned_rt_props,
                 };
 
                 if let Some((best_score, _)) = &best_device {

@@ -22,6 +22,7 @@ pub struct InstanceDescription<W: HasDisplayHandle + HasWindowHandle> {
 pub struct DeviceDescription {
     pub use_compute_queue: bool,
     pub use_transfer_queue: bool,
+    pub ray_tracing: bool,
 }
 
 /// High level swapchain description
@@ -30,4 +31,65 @@ pub struct SwapchainDescription {
     pub image_count: u32,
     pub width: u32,
     pub height: u32,
+}
+
+/// Wrapper for vk::Extent3D
+#[derive(Clone, Copy)]
+pub struct Extent3D {
+    pub width: u32,
+    pub height: u32,
+    pub depth: u32,
+}
+
+impl Extent3D {
+    pub(crate) fn to_vk(&self) -> ash::vk::Extent3D {
+        return ash::vk::Extent3D {
+            width: self.width,
+            height: self.height,
+            depth: self.depth,
+        };
+    }
+}
+
+/// Wrapper for vk::Extent2D
+#[derive(Clone, Copy)]
+pub struct Extent2D {
+    pub width: u32,
+    pub height: u32,
+}
+
+impl Extent2D {
+    pub(crate) fn to_vk(&self) -> ash::vk::Extent2D {
+        return ash::vk::Extent2D {
+            width: self.width,
+            height: self.height,
+        };
+    }
+}
+
+/// Wrapper for vk::Offset3D
+#[derive(Clone, Copy)]
+pub struct Offset3D {
+    pub x: i32,
+    pub y: i32,
+    pub z: i32,
+}
+
+impl Offset3D {
+    pub(crate) fn to_vk(&self) -> ash::vk::Offset3D {
+        return ash::vk::Offset3D { x: self.x, y: self.y, z: self.z };
+    }
+}
+
+/// Wrapper for vk::Offset2D
+#[derive(Clone, Copy)]
+pub struct Offset2D {
+    pub x: i32,
+    pub y: i32,
+}
+
+impl Offset2D {
+    pub(crate) fn to_vk(&self) -> ash::vk::Offset2D {
+        return ash::vk::Offset2D { x: self.x, y: self.y };
+    }
 }

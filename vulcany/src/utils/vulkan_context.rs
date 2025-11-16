@@ -2,6 +2,8 @@ use crate::*;
 use delegate::delegate;
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 
+#[allow(unused)]
+#[derive(Clone)]
 pub struct VulkanContext {
     instance: Instance,
     device: Device,
@@ -81,8 +83,8 @@ impl VulkanContext {
             pub fn present(&self);
         }
         to self.pipeline_manager {
-            pub fn create_rasterization_pipeline(&self, raster_pipeline_desc: &RasterizationPipelineDescription) -> Pipeline;
-            pub fn create_compute_pipeline(&self, compute_pipeline_desc: &ComputePipelineDescription) -> Pipeline;
+            pub fn create_rasterization_pipeline(&self, raster_pipeline_desc: &RasterizationPipelineDescription) -> RasterizationPipeline;
+            pub fn create_compute_pipeline(&self, compute_pipeline_desc: &ComputePipelineDescription) -> ComputePipeline;
         }
     }
 }

@@ -25,7 +25,7 @@ impl Instance {
     pub fn create_device(&self, device_desc: &DeviceDescription) -> Device {
         let (device, physical_device, allocator) = self.inner.create_device_data(device_desc);
         let (graphics_queue, transfer_queue, compute_queue) = InnerInstance::create_queues(&device, &physical_device);
-        let bindless_desc = GpuBindlessDescriptorPool::new(&device, &allocator, 100, 100, 100, 100);
+        let bindless_desc = GpuBindlessDescriptorPool::new(&device, 100, 100, 100, 100);
 
         return Device {
             inner: Arc::new(InnerDevice {
@@ -45,6 +45,8 @@ impl Instance {
                 graphics_queue: graphics_queue,
                 transfer_queue: transfer_queue,
                 compute_queue: compute_queue,
+
+                rt: None,
             }),
         };
     }

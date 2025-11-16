@@ -26,7 +26,7 @@ struct VulkanApp {
     device: Device,
     swapchain: Swapchain,
     pipeline_manager: PipelineManager,
-    raster_pipeline: Pipeline,
+    raster_pipeline: RasterizationPipeline,
     vertex_buffer: BufferID,
     color_buffer: BufferID,
     time: f32,
@@ -54,6 +54,7 @@ impl VulkanApp {
         let device = instance.create_device(&DeviceDescription {
             use_compute_queue: true,
             use_transfer_queue: true,
+            ray_tracing: false,
         });
 
         let swapchain = device.create_swapchain(&SwapchainDescription {
@@ -230,9 +231,11 @@ impl VulkanApp {
             .command_recorder
             .begin_rendering(&RenderingBeginInfo {
                 render_area: RenderArea {
-                    offset: 0,
-                    width: size.width,
-                    height: size.height,
+                    offset: Offset2D { x: 0, y: 0 },
+                    extent: Extent2D {
+                        width: size.width,
+                        height: size.height,
+                    },
                 },
                 rendering_flags: RenderingFlags::None,
                 view_mask: 0,

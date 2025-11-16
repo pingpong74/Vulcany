@@ -1,4 +1,4 @@
-use crate::{Barrier, BufferID, CommandRecorder, Device, ImageID, ImageViewID, SamplerID, Swapchain, taskgraph::definations::*};
+use crate::{Barrier, BufferID, Device, ImageID, ImageViewID, Swapchain, taskgraph::definations::*};
 
 /// Pre compliation task graph.
 /// It can be mutated and all resources required must be specified on this stage

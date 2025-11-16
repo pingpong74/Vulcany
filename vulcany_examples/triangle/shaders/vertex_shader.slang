@@ -21,7 +21,7 @@ struct TriangleColor {
 VertexOutput main(VertexInput vsin) {
   VertexOutput output;
   output.pos = float4(vsin.pos, 0, 1);
-  let color_buffer = vulcany::get_buffer<TriangleColor>(0);
+  let color_buffer = vulcanny::ReadOnlyBuffer<TriangleColor>::get_buffer(0);
   output.color = color_buffer[0].color;
   return output;
 }

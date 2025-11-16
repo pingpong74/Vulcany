@@ -1,4 +1,3 @@
-use super::instance::Instance;
 use std::sync::Arc;
 
 use crate::{ImageID, ImageViewID, Semaphore, backend::swapchain::InnerSwapchain};

@@ -19,7 +19,7 @@ use vk_mem::*;
 pub(crate) struct InnerDevice {
     pub(crate) allocator: Allocator,
     pub(crate) handle: ash::Device,
-    pub(crate) physical_device: PhysicalDevice,
+    pub(crate) physical_device: PhysicalDevice<'static>,
     pub(crate) instance: Arc<InnerInstance>,
 
     //Pools for various gpu resources
@@ -33,6 +33,9 @@ pub(crate) struct InnerDevice {
     pub(crate) graphics_queue: vk::Queue,
     pub(crate) transfer_queue: vk::Queue,
     pub(crate) compute_queue: vk::Queue,
+
+    // Extensions
+    pub(crate) rt: Option<ash::khr::ray_tracing_pipeline::Device>,
 }
 
 // Swapchain Creation //
@@ -318,7 +321,7 @@ impl InnerDevice {
         let buffer_pool = self.buffer_pool.read().unwrap();
         let buffer = buffer_pool.get_ref(buffer_write_info.buffer.id);
 
-        self.bindless_descriptors.write_buffer(&self.handle, buffer.address, buffer_write_info.index);
+        self.bindless_descriptors.write_buffer(&self.handle, buffer.handle, buffer_write_info.index);
     }
 
     pub(crate) fn write_image(&self, image_write_info: &ImageWriteInfo) {
@@ -485,7 +488,7 @@ impl InnerDevice {
 
 impl Drop for InnerDevice {
     fn drop(&mut self) {
-        self.bindless_descriptors.cleanup(&self.handle, &self.allocator);
+        self.bindless_descriptors.cleanup(&self.handle);
 
         unsafe {
             std::ptr::drop_in_place(&mut self.allocator);

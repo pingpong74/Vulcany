@@ -309,6 +309,15 @@ impl Default for ImageDescription {
     }
 }
 
+#[derive(Clone, Copy)]
+pub struct ImageSubresourceLayers {
+    pub aspect: ImageAspect,
+    pub mip_level: u32,
+    pub level_count: u32,
+    pub base_array_layer: u32,
+    pub layer_count: u32,
+}
+
 //// Image View Description ////
 #[derive(Clone, Copy)]
 pub enum ImageViewType {

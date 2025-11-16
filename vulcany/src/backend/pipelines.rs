@@ -1,12 +1,13 @@
+use ahash::{HashMap, HashMapExt};
 use ash::vk;
+use smallvec::smallvec;
 
-use crate::backend::device::InnerDevice;
+use crate::{BufferID, RayTracingPipelineDescription, backend::device::InnerDevice, *};
 
 use serde::{Deserialize, Serialize};
 
 use crate::{ComputePipelineDescription, RasterizationPipelineDescription};
 use std::{
-    collections::HashMap,
     fs::{self, File},
     io::{Read, Write},
     path::Path,
@@ -280,13 +281,7 @@ impl InnerPipelineManager {
     }
 
     pub(crate) fn create_compute_pipeline(&self, compute_pipeline_desc: &ComputePipelineDescription) -> (vk::Pipeline, vk::PipelineLayout) {
-        let shader = self.get_spv_path(compute_pipeline_desc.shader_path).unwrap_or_else(|| panic!("Wrong shader provided!!"));
-
-        let shader_code = InnerPipelineManager::read_spv_file(&shader);
-
-        let module_create_info = vk::ShaderModuleCreateInfo::default().code(shader_code.as_slice());
-
-        let shader_module = unsafe { self.device.handle.create_shader_module(&module_create_info, None).expect("Failed to crate shader module") };
+        let shader_module = self.create_shader_module(compute_pipeline_desc.shader_path);
 
         // pipeline layout
         let push_constant_ranges = [vk::PushConstantRange::default()
@@ -318,12 +313,317 @@ impl InnerPipelineManager {
                 .expect("Failed to create compute pipeline")
         }[0];
 
+        unsafe {
+            self.device.handle.destroy_shader_module(shader_module, None);
+        }
+
         return (pipeline, pipeline_layout);
+    }
+
+    pub(crate) fn create_rt_pipeline(&self, desc: &RayTracingPipelineDescription) -> (vk::Pipeline, vk::PipelineLayout) {
+        let mut shader_stages: Vec<vk::PipelineShaderStageCreateInfo> = Vec::new();
+        let mut hit_group_infos: Vec<vk::RayTracingShaderGroupCreateInfoKHR> = Vec::new();
+        let mut shader_modules: Vec<vk::ShaderModule> = Vec::new();
+
+        let mut stage_index = 0u32;
+
+        let cstr_main = std::ffi::CString::new("main").unwrap();
+
+        // -------------------------
+        // RAYGEN SHADER
+        // -------------------------
+        let raygen_module = self.create_shader_module(desc.raygen);
+        shader_modules.push(raygen_module);
+
+        shader_stages.push(
+            vk::PipelineShaderStageCreateInfo::default()
+                .stage(vk::ShaderStageFlags::RAYGEN_KHR)
+                .module(raygen_module)
+                .name(&cstr_main),
+        );
+        let raygen_index = stage_index;
+        stage_index += 1;
+
+        // -------------------------
+        // MISS SHADERS
+        // -------------------------
+        let mut miss_indices = Vec::new();
+        for m in &desc.miss {
+            let module = self.create_shader_module(m);
+            shader_modules.push(module);
+
+            shader_stages.push(vk::PipelineShaderStageCreateInfo::default().stage(vk::ShaderStageFlags::MISS_KHR).module(module).name(&cstr_main));
+
+            miss_indices.push(stage_index);
+            stage_index += 1;
+        }
+
+        // -------------------------
+        // HIT GROUPS
+        // -------------------------
+        for hg in &desc.hit_grps {
+            let mut closest = vk::SHADER_UNUSED_KHR;
+            let mut any = vk::SHADER_UNUSED_KHR;
+            let mut intersection = vk::SHADER_UNUSED_KHR;
+
+            // CLOSEST-HIT
+            if !hg.closet_hit.is_empty() {
+                let module = self.create_shader_module(hg.closet_hit);
+                shader_modules.push(module);
+
+                shader_stages.push(
+                    vk::PipelineShaderStageCreateInfo::default()
+                        .stage(vk::ShaderStageFlags::CLOSEST_HIT_KHR)
+                        .module(module)
+                        .name(&cstr_main),
+                );
+                closest = stage_index;
+                stage_index += 1;
+            }
+
+            // ANY-HIT
+            if !hg.any_hit.is_empty() {
+                let module = self.create_shader_module(hg.any_hit);
+                shader_modules.push(module);
+
+                shader_stages.push(vk::PipelineShaderStageCreateInfo::default().stage(vk::ShaderStageFlags::ANY_HIT_KHR).module(module).name(&cstr_main));
+                any = stage_index;
+                stage_index += 1;
+            }
+
+            // INTERSECTION (procedural only)
+            if hg.hit_grp_type == HitGroupType::Procedural {
+                if hg.intersection.is_empty() {
+                    panic!("Procedural hit group must have intersection shader");
+                }
+
+                let module = self.create_shader_module(hg.intersection);
+                shader_modules.push(module);
+
+                shader_stages.push(
+                    vk::PipelineShaderStageCreateInfo::default()
+                        .stage(vk::ShaderStageFlags::INTERSECTION_KHR)
+                        .module(module)
+                        .name(&cstr_main),
+                );
+
+                intersection = stage_index;
+                stage_index += 1;
+            }
+
+            // Hit group info
+            let group = vk::RayTracingShaderGroupCreateInfoKHR::default()
+                .ty(match hg.hit_grp_type {
+                    HitGroupType::Triangle => vk::RayTracingShaderGroupTypeKHR::TRIANGLES_HIT_GROUP,
+                    HitGroupType::Procedural => vk::RayTracingShaderGroupTypeKHR::PROCEDURAL_HIT_GROUP,
+                })
+                .closest_hit_shader(closest)
+                .any_hit_shader(any)
+                .intersection_shader(intersection)
+                .general_shader(vk::SHADER_UNUSED_KHR);
+
+            hit_group_infos.push(group);
+        }
+
+        // -------------------------
+        // Pipeline Layout
+        // -------------------------
+
+        let pc = vk::PushConstantRange::default()
+            .offset(desc.push_constants.offset)
+            .size(desc.push_constants.size)
+            .stage_flags(desc.push_constants.stage_flags.to_vk());
+
+        let layouts = [self.desc_layout];
+        let layout_info = if desc.push_constants.size == 0 {
+            vk::PipelineLayoutCreateInfo::default().set_layouts(&layouts)
+        } else {
+            vk::PipelineLayoutCreateInfo::default().set_layouts(&layouts).push_constant_ranges(std::slice::from_ref(&pc))
+        };
+
+        let pipeline_layout = unsafe { self.device.handle.create_pipeline_layout(&layout_info, None).expect("Failed to create RT pipeline layout") };
+
+        // -------------------------
+        // Create Pipeline
+        // -------------------------
+
+        let rt_pipeline_info = vk::RayTracingPipelineCreateInfoKHR::default()
+            .stages(&shader_stages)
+            .groups(&hit_group_infos)
+            .max_pipeline_ray_recursion_depth(2)
+            .layout(pipeline_layout);
+
+        let pipeline = unsafe {
+            match &self.device.rt {
+                Some(rt) => rt
+                    .create_ray_tracing_pipelines(vk::DeferredOperationKHR::null(), vk::PipelineCache::null(), &[rt_pipeline_info], None)
+                    .expect("Failed to create RT pipeline")[0],
+                None => panic!("Tried ray tracing without enabling ray tracing"),
+            }
+        };
+
+        // Destroy all shader modules
+        for m in shader_modules {
+            unsafe { self.device.handle.destroy_shader_module(m, None) };
+        }
+
+        (pipeline, pipeline_layout)
+    }
+
+    pub(crate) fn create_sbt(&self, desc: &RayTracingPipelineDescription, pipeline: vk::Pipeline, rt_props: &vk::PhysicalDeviceRayTracingPipelinePropertiesKHR) -> ShaderBindingTable {
+        // --- sizes from properties ---
+        let handle_size = rt_props.shader_group_handle_size as usize;
+        let handle_alignment = rt_props.shader_group_handle_alignment as usize;
+        let base_alignment = rt_props.shader_group_base_alignment as usize;
+
+        fn align_up(x: usize, a: usize) -> usize {
+            if a == 0 { x } else { (x + (a - 1)) & !(a - 1) }
+        }
+
+        // stride: handle size aligned to handle_alignment
+        let handle_stride = align_up(handle_size, handle_alignment);
+
+        // SBT layout: [ rgen(1) | miss(N) | hit(M) ]
+        let rgen_count = 1usize;
+        let miss_count = desc.miss.len();
+        let hit_count = desc.hit_grps.len();
+
+        // each section size must be aligned to base_alignment
+        let rgen_size = align_up(rgen_count * handle_stride, base_alignment);
+        let miss_size = align_up(miss_count * handle_stride, base_alignment);
+        let hit_size = align_up(hit_count * handle_stride, base_alignment);
+        let sbt_size = rgen_size + miss_size + hit_size;
+
+        // --- fetch raw shader group handles from pipeline ---
+        let group_count = (rgen_count + miss_count + hit_count) as u32;
+        let mut handles = unsafe {
+            match &self.device.rt {
+                Some(rt) => rt
+                    .get_ray_tracing_shader_group_handles(pipeline, 0, group_count, handle_size * group_count as usize)
+                    .expect("get_ray_tracing_shader_group_handles failed"),
+                None => panic!("Tried ray tracing without enabling ray tracing"),
+            }
+        };
+
+        // --- pack handles into a CPU-side contiguous SBT buffer with padding ---
+        let mut sbt_data = vec![0u8; sbt_size];
+        let mut dst_offset = 0usize;
+        let mut src_index = 0usize; // which group handle we're reading
+
+        // Raygen (group 0)
+        sbt_data[dst_offset..dst_offset + handle_size].copy_from_slice(&handles[src_index * handle_size..src_index * handle_size + handle_size]);
+        src_index += 1;
+        dst_offset += rgen_size;
+
+        // Miss records (groups 1..=miss_count)
+        for _ in 0..miss_count {
+            sbt_data[dst_offset..dst_offset + handle_size].copy_from_slice(&handles[src_index * handle_size..src_index * handle_size + handle_size]);
+            src_index += 1;
+            dst_offset += handle_stride; // advance by stride inside the miss block
+        }
+        // after loop, align dst_offset to the miss section end (it already is at rgen_size + miss_count*handle_stride)
+        // but ensure we move to the start of hit section (rgen_size + miss_size)
+        dst_offset = rgen_size + miss_size;
+
+        // Hit group records (groups after miss)
+        for _ in 0..hit_count {
+            // write handle_size bytes at dst_offset
+            sbt_data[dst_offset..dst_offset + handle_size].copy_from_slice(&handles[src_index * handle_size..src_index * handle_size + handle_size]);
+            src_index += 1;
+            dst_offset += handle_stride; // advance by stride for next hit record
+        }
+
+        // --- create staging buffer and upload the sbt_data ---
+        let staging = self.device.create_buffer(&BufferDescription {
+            usage: BufferUsage::TRANSFER_SRC,
+            size: sbt_size as u64,
+            memory_type: MemoryType::PreferHost,
+            create_mapped: true,
+        });
+        self.device.write_data_to_buffer(staging, &sbt_data);
+
+        // --- create device-local SBT buffer ---
+        let sbt_buffer = self.device.create_buffer(&BufferDescription {
+            usage: BufferUsage::TRANSFER_DST
+                | BufferUsage {
+                    flags: vk::BufferUsageFlags::SHADER_BINDING_TABLE_KHR,
+                },
+            size: sbt_size as u64,
+            memory_type: MemoryType::DeviceLocal,
+            create_mapped: false,
+        });
+
+        // copy staging -> device SBT buffer
+        let mut recorder = CommandRecorder {
+            handle: self.device.createcmd_recorder_data(QueueType::Transfer),
+            commad_buffers: smallvec![],
+            exec_command_buffers: smallvec![],
+            current_commad_buffer: vk::CommandBuffer::null(),
+            queue_type: QueueType::Transfer,
+            remembered_image_ids: HashMap::new(),
+            remembered_buffer_ids: HashMap::new(),
+            remembered_image_view_ids: HashMap::new(),
+            device: self.device.clone(),
+        };
+        recorder.begin_recording(CommandBufferUsage::OneTimeSubmit);
+        recorder.copy_buffer(&BufferCopyInfo {
+            src_buffer: staging,
+            dst_buffer: sbt_buffer,
+            size: sbt_size as u64,
+            src_offset: 0,
+            dst_offset: 0,
+        });
+        let cmd = recorder.end_recording();
+
+        self.device.submit(&QueueSubmitInfo {
+            fence: None,
+            command_buffers: vec![cmd],
+            wait_semaphores: vec![],
+            signal_semaphores: vec![],
+        });
+        self.device.wait_queue(QueueType::Transfer);
+        self.device.destroy_buffer(staging);
+
+        // --- build SBT regions (device addresses) ---
+        let buff_pool = self.device.buffer_pool.read().unwrap();
+        let base_addr = buff_pool.get_ref(sbt_buffer.id).address;
+        let rgen_region = vk::StridedDeviceAddressRegionKHR {
+            device_address: base_addr,
+            stride: handle_stride as u64,
+            size: rgen_size as u64,
+        };
+        let miss_region = vk::StridedDeviceAddressRegionKHR {
+            device_address: base_addr + rgen_size as u64,
+            stride: handle_stride as u64,
+            size: miss_size as u64,
+        };
+        let hit_region = vk::StridedDeviceAddressRegionKHR {
+            device_address: base_addr + rgen_size as u64 + miss_size as u64,
+            stride: handle_stride as u64,
+            size: hit_size as u64,
+        };
+
+        ShaderBindingTable {
+            buffer: sbt_buffer,
+            rgen: rgen_region,
+            miss: miss_region,
+            hit: hit_region,
+        }
     }
 }
 
 //// Helpers ////
 impl InnerPipelineManager {
+    fn create_shader_module(&self, path: &str) -> vk::ShaderModule {
+        let shader = self.get_spv_path(path).unwrap_or_else(|| panic!("Wrong shader provided!!"));
+
+        let shader_code = InnerPipelineManager::read_spv_file(&shader);
+
+        let module_create_info = vk::ShaderModuleCreateInfo::default().code(shader_code.as_slice());
+
+        return unsafe { self.device.handle.create_shader_module(&module_create_info, None).expect("Failed to crate shader module") };
+    }
+
     fn read_spv_file(path: &str) -> Vec<u32> {
         use std::fs::File;
         use std::io::Read;
@@ -359,6 +659,7 @@ impl Drop for InnerRasterizationPipeline {
 pub(crate) struct InnerComputePipeline {
     pub(crate) handle: vk::Pipeline,
     pub(crate) layout: vk::PipelineLayout,
+    pub(crate) desc: ComputePipelineDescription,
     pub(crate) manager: Arc<InnerPipelineManager>,
 }
 
@@ -369,4 +670,11 @@ impl Drop for InnerComputePipeline {
             self.manager.device.handle.destroy_pipeline_layout(self.layout, None);
         }
     }
+}
+
+pub(crate) struct ShaderBindingTable {
+    pub(crate) buffer: BufferID,
+    pub(crate) rgen: vk::StridedDeviceAddressRegionKHR,
+    pub(crate) miss: vk::StridedDeviceAddressRegionKHR,
+    pub(crate) hit: vk::StridedDeviceAddressRegionKHR,
 }

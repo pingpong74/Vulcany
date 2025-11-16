@@ -46,9 +46,8 @@ impl IndexType {
 // Render begin info
 #[derive(Clone, Copy)]
 pub struct RenderArea {
-    pub offset: u32,
-    pub width: u32,
-    pub height: u32,
+    pub offset: Offset2D,
+    pub extent: Extent2D,
 }
 #[derive(Copy, Clone, PartialEq)]
 pub enum LoadOp {
@@ -210,7 +209,10 @@ pub struct RenderingBeginInfo {
 impl Default for RenderingBeginInfo {
     fn default() -> Self {
         return Self {
-            render_area: RenderArea { offset: 0, width: 0, height: 0 },
+            render_area: RenderArea {
+                offset: Offset2D { x: 0, y: 0 },
+                extent: Extent2D { width: 0, height: 0 },
+            },
             rendering_flags: RenderingFlags::None,
             view_mask: 0,
             layer_count: 0,
@@ -221,6 +223,20 @@ impl Default for RenderingBeginInfo {
     }
 }
 
+// Compute
+#[derive(Clone, Debug)]
+pub struct DispatchInfo {
+    pub group_count_x: u32,
+    pub group_count_y: u32,
+    pub group_count_z: u32,
+}
+
+#[derive(Clone)]
+pub struct DispatchIndirectInfo {
+    pub buffer: BufferID,
+    pub offset: u64,
+}
+
 // Copy commands
 pub struct BufferCopyInfo {
     pub src_buffer: BufferID,
@@ -228,6 +244,60 @@ pub struct BufferCopyInfo {
     pub src_offset: u64,
     pub dst_offset: u64,
     pub size: u64,
+}
+
+#[derive(Clone, Copy)]
+pub struct BufferImageCopyInfo {
+    pub src_buffer: BufferID,
+    pub dst_image: ImageID,
+    pub dst_image_layout: ImageLayout,
+    pub region: BufferImageCopyRegion,
+}
+
+#[derive(Clone, Copy)]
+pub struct BufferImageCopyRegion {
+    pub buffer_offset: u64,
+    pub buffer_row_length: u32,
+    pub buffer_image_height: u32,
+    pub image_subresource: ImageSubresourceLayers,
+    pub image_offset: Offset3D,
+    pub image_extent: Extent3D,
+}
+
+#[derive(Clone, Copy)]
+pub struct ImageCopyInfo {
+    pub src_image: ImageID,
+    pub src_image_layout: ImageLayout,
+    pub dst_image: ImageID,
+    pub dst_image_layout: ImageLayout,
+    pub region: ImageCopyRegion,
+}
+
+#[derive(Clone, Copy)]
+pub struct ImageCopyRegion {
+    pub src_subresource: ImageSubresourceLayers,
+    pub src_offset: Offset3D,
+    pub dst_subresource: ImageSubresourceLayers,
+    pub dst_offset: Offset3D,
+    pub extent: Extent3D,
+}
+
+#[derive(Clone)]
+pub struct BlitInfo {
+    pub src_image: ImageID,
+    pub src_layout: ImageLayout,
+    pub dst_image: ImageID,
+    pub dst_layout: ImageLayout,
+    pub regions: Vec<BlitRegion>,
+    pub filter: Filter,
+}
+
+#[derive(Clone, Copy)]
+pub struct BlitRegion {
+    pub src_subresource: ImageSubresourceLayers,
+    pub src_offsets: [Offset3D; 2],
+    pub dst_subresource: ImageSubresourceLayers,
+    pub dst_offsets: [Offset3D; 2],
 }
 
 // Memory barriers

@@ -1,4 +1,4 @@
-use crate::{BufferID, CommandRecorder, Device, ImageAspect, ImageID, ImageLayout, ImageViewID, Pipeline, Swapchain};
+use crate::{BufferID, CommandRecorder, Device, ImageID, ImageLayout, ImageViewID, Swapchain};
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum TaskAccess {

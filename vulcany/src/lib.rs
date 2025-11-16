@@ -25,7 +25,7 @@ macro_rules! vertex {
         }
     ) => {
         #[repr(C)]
-        #[derive(Copy, Clone, $crate::bytemuck::Pod, $crate::bytemuck::Zeroable)]
+        #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
         pub struct $name {
             $( pub $field: $ty, )*
         }

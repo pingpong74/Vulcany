@@ -4,7 +4,10 @@ use ahash::HashMap;
 use ash::vk;
 use smallvec::SmallVec;
 
-use crate::{Barrier, BufferCopyInfo, BufferID, CommandBufferUsage, ImageID, ImageViewID, IndexType, Pipeline, QueueType, RenderingBeginInfo, backend::device::InnerDevice};
+use crate::{
+    Barrier, BlitInfo, BufferCopyInfo, BufferID, BufferImageCopyInfo, CommandBufferUsage, DispatchIndirectInfo, DispatchInfo, ImageCopyInfo, ImageID, ImageViewID, IndexType, Pipeline, QueueType,
+    RenderingBeginInfo, backend::device::InnerDevice,
+};
 
 /// Not thread safe!!
 /// This is because normal vulkan command pools arent hread safe either
@@ -62,6 +65,7 @@ impl CommandRecorder {
         };
     }
 
+    // Dynamic rendering
     pub fn begin_rendering(&mut self, rendering_begin_info: &RenderingBeginInfo) {
         let mut color_attachment_info = SmallVec::<[vk::RenderingAttachmentInfo; 4]>::new();
 
@@ -92,11 +96,8 @@ impl CommandRecorder {
             .layer_count(rendering_begin_info.layer_count)
             .view_mask(rendering_begin_info.view_mask)
             .render_area(vk::Rect2D {
-                extent: vk::Extent2D {
-                    width: rendering_begin_info.render_area.width,
-                    height: rendering_begin_info.render_area.height,
-                },
-                offset: vk::Offset2D { x: 0, y: 0 },
+                extent: rendering_begin_info.render_area.extent.to_vk(),
+                offset: rendering_begin_info.render_area.offset.to_vk(),
             });
 
         let depth_attachment_info: vk::RenderingAttachmentInfo;
@@ -187,31 +188,26 @@ impl CommandRecorder {
         }
     }
 
-    pub fn set_push_constants<T: bytemuck::Pod>(&self, push_constants: &T, pipeline: &Pipeline) {
+    pub fn set_push_constants(&self, push_constants: &impl bytemuck::Pod, pipeline: &impl Pipeline) {
         let data = bytemuck::bytes_of(push_constants);
         unsafe {
             self.device
                 .handle
-                .cmd_push_constants(self.current_commad_buffer, pipeline.get_layout(), pipeline.get_push_const_shader_stage(), 0, data);
+                .cmd_push_constants(self.current_commad_buffer, pipeline.get_layout(), pipeline.get_push_const_shader_stage().to_vk(), 0, data);
         }
     }
 
-    pub fn bind_pipeline(&self, pipeline: &Pipeline) {
+    pub fn bind_pipeline(&self, pipeline: &impl Pipeline) {
         unsafe {
-            match pipeline {
-                Pipeline::RasterizationPipeline(inner) => {
-                    self.device.handle.cmd_bind_pipeline(self.current_commad_buffer, vk::PipelineBindPoint::GRAPHICS, inner.handle);
-                    self.device.handle.cmd_bind_descriptor_sets(
-                        self.current_commad_buffer,
-                        vk::PipelineBindPoint::GRAPHICS,
-                        inner.layout,
-                        0,
-                        &[self.device.bindless_descriptors.set],
-                        &[],
-                    );
-                }
-                Pipeline::ComputePipeline(inner) => self.device.handle.cmd_bind_pipeline(self.current_commad_buffer, vk::PipelineBindPoint::COMPUTE, inner.handle),
-            }
+            self.device.handle.cmd_bind_pipeline(self.current_commad_buffer, pipeline.get_bind_point(), pipeline.get_handle());
+            self.device.handle.cmd_bind_descriptor_sets(
+                self.current_commad_buffer,
+                pipeline.get_bind_point(),
+                pipeline.get_layout(),
+                0,
+                &[self.device.bindless_descriptors.set],
+                &[],
+            );
         }
     }
 
@@ -247,11 +243,25 @@ impl CommandRecorder {
         }
     }
 
+    //// Compute commands ////
+    pub fn dispatch(&self, info: &DispatchInfo) {
+        unsafe {
+            self.device.handle.cmd_dispatch(self.current_commad_buffer, info.group_count_x, info.group_count_y, info.group_count_z);
+        }
+    }
+
+    pub fn dispatch_indirect(&mut self, info: &DispatchIndirectInfo) {
+        let buffer = self.check_and_remeber_buffer_id(info.buffer);
+        unsafe {
+            self.device.handle.cmd_dispatch_indirect(self.current_commad_buffer, buffer, info.offset);
+        }
+    }
+
     //// Pipeline barriers and sync ////
     pub fn pipeline_barrier(&mut self, barriers: &[Barrier]) {
-        let mut mem_barriers = SmallVec::<[vk::MemoryBarrier2; 4]>::new();
-        let mut image_barriers = SmallVec::<[vk::ImageMemoryBarrier2; 4]>::new();
-        let mut buffer_barriers = SmallVec::<[vk::BufferMemoryBarrier2; 4]>::new();
+        let mut mem_barriers = SmallVec::<[vk::MemoryBarrier2; 2]>::new();
+        let mut image_barriers = SmallVec::<[vk::ImageMemoryBarrier2; 2]>::new();
+        let mut buffer_barriers = SmallVec::<[vk::BufferMemoryBarrier2; 2]>::new();
 
         for b in barriers {
             match b {
@@ -324,6 +334,142 @@ impl CommandRecorder {
 
         unsafe {
             self.device.handle.cmd_copy_buffer2(self.current_commad_buffer, &copy_info);
+        }
+    }
+
+    pub fn copy_buffer_to_image(&mut self, info: &BufferImageCopyInfo) {
+        let src = self.check_and_remeber_buffer_id(info.src_buffer);
+        let dst = self.check_and_remeber_image_id(info.dst_image);
+
+        let subresource = vk::ImageSubresourceLayers {
+            aspect_mask: info.region.image_subresource.aspect.to_vk_aspect(),
+            mip_level: info.region.image_subresource.mip_level,
+            base_array_layer: info.region.image_subresource.base_array_layer,
+            layer_count: info.region.image_subresource.layer_count,
+        };
+
+        let region = vk::BufferImageCopy2::default()
+            .buffer_offset(info.region.buffer_offset)
+            .buffer_row_length(info.region.buffer_row_length)
+            .buffer_image_height(info.region.buffer_image_height)
+            .image_subresource(subresource)
+            .image_offset(info.region.image_offset.to_vk())
+            .image_extent(info.region.image_extent.to_vk());
+
+        let copy_info = vk::CopyBufferToImageInfo2::default()
+            .src_buffer(src)
+            .dst_image(dst)
+            .dst_image_layout(info.dst_image_layout.to_vk_layout())
+            .regions(std::slice::from_ref(&region));
+
+        unsafe {
+            self.device.handle.cmd_copy_buffer_to_image2(self.current_commad_buffer, &copy_info);
+        }
+    }
+
+    pub fn copy_image_to_buffer(&mut self, info: &BufferImageCopyInfo) {
+        // same struct is symmetric
+        let src = self.check_and_remeber_image_id(info.dst_image); // swap
+        let dst = self.check_and_remeber_buffer_id(info.src_buffer);
+
+        let subresource = vk::ImageSubresourceLayers {
+            aspect_mask: info.region.image_subresource.aspect.to_vk_aspect(),
+            mip_level: info.region.image_subresource.mip_level,
+            base_array_layer: info.region.image_subresource.base_array_layer,
+            layer_count: info.region.image_subresource.layer_count,
+        };
+
+        let region = vk::BufferImageCopy2::default()
+            .buffer_offset(info.region.buffer_offset)
+            .buffer_row_length(info.region.buffer_row_length)
+            .buffer_image_height(info.region.buffer_image_height)
+            .image_subresource(subresource)
+            .image_offset(info.region.image_offset.to_vk())
+            .image_extent(info.region.image_extent.to_vk());
+
+        let copy_info = vk::CopyImageToBufferInfo2::default()
+            .src_image(src)
+            .src_image_layout(info.dst_image_layout.to_vk_layout())
+            .dst_buffer(dst)
+            .regions(std::slice::from_ref(&region));
+
+        unsafe {
+            self.device.handle.cmd_copy_image_to_buffer2(self.current_commad_buffer, &copy_info);
+        }
+    }
+
+    pub fn copy_image(&mut self, info: &ImageCopyInfo) {
+        let src = self.check_and_remeber_image_id(info.src_image);
+        let dst = self.check_and_remeber_image_id(info.dst_image);
+
+        let src_subresource = vk::ImageSubresourceLayers {
+            aspect_mask: info.region.src_subresource.aspect.to_vk_aspect(),
+            mip_level: info.region.src_subresource.mip_level,
+            base_array_layer: info.region.src_subresource.base_array_layer,
+            layer_count: info.region.src_subresource.layer_count,
+        };
+        let dst_subresource = vk::ImageSubresourceLayers {
+            aspect_mask: info.region.dst_subresource.aspect.to_vk_aspect(),
+            mip_level: info.region.dst_subresource.mip_level,
+            base_array_layer: info.region.dst_subresource.base_array_layer,
+            layer_count: info.region.dst_subresource.layer_count,
+        };
+
+        let region = vk::ImageCopy2::default()
+            .src_subresource(src_subresource)
+            .src_offset(info.region.src_offset.to_vk())
+            .dst_subresource(dst_subresource)
+            .dst_offset(info.region.dst_offset.to_vk())
+            .extent(info.region.extent.to_vk());
+
+        let copy_info = vk::CopyImageInfo2::default()
+            .src_image(src)
+            .src_image_layout(info.src_image_layout.to_vk_layout())
+            .dst_image(dst)
+            .dst_image_layout(info.dst_image_layout.to_vk_layout())
+            .regions(std::slice::from_ref(&region));
+
+        unsafe {
+            self.device.handle.cmd_copy_image2(self.current_commad_buffer, &copy_info);
+        }
+    }
+
+    pub fn blit_image2(&mut self, info: &BlitInfo) {
+        let src = self.check_and_remeber_image_id(info.src_image);
+        let dst = self.check_and_remeber_image_id(info.dst_image);
+
+        let regions: SmallVec<[vk::ImageBlit2; 4]> = info
+            .regions
+            .iter()
+            .map(|r| {
+                vk::ImageBlit2::default()
+                    .src_subresource(vk::ImageSubresourceLayers {
+                        aspect_mask: r.src_subresource.aspect.to_vk_aspect(),
+                        mip_level: r.src_subresource.mip_level,
+                        base_array_layer: r.src_subresource.base_array_layer,
+                        layer_count: r.src_subresource.layer_count,
+                    })
+                    .src_offsets([r.src_offsets[0].to_vk(), r.src_offsets[1].to_vk()])
+                    .dst_subresource(vk::ImageSubresourceLayers {
+                        aspect_mask: r.dst_subresource.aspect.to_vk_aspect(),
+                        mip_level: r.dst_subresource.mip_level,
+                        base_array_layer: r.dst_subresource.base_array_layer,
+                        layer_count: r.dst_subresource.layer_count,
+                    })
+                    .dst_offsets([r.dst_offsets[0].to_vk(), r.dst_offsets[1].to_vk()])
+            })
+            .collect();
+
+        let blit_info = vk::BlitImageInfo2::default()
+            .src_image(src)
+            .src_image_layout(info.src_layout.to_vk_layout())
+            .dst_image(dst)
+            .dst_image_layout(info.dst_layout.to_vk_layout())
+            .regions(&regions)
+            .filter(info.filter.to_vk());
+
+        unsafe {
+            self.device.handle.cmd_blit_image2(self.current_commad_buffer, &blit_info);
         }
     }
 }

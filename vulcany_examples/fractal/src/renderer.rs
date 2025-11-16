@@ -23,7 +23,7 @@ struct MyPushConstants {
 
 pub struct Renderer {
     vk_context: VulkanContext,
-    pipeline: Pipeline,
+    pipeline: RasterizationPipeline,
     curr_frame: usize,
     frame_data: [FrameData; FRAMES_IN_FLIGHT],
 }
@@ -55,7 +55,7 @@ impl Renderer {
                 fragment_shader_path: "shaders/fragment.slang",
                 cull_mode: CullMode::Back,
                 front_face: FrontFace::Clockwise,
-                push_constants: PushConstants {
+                push_constants: PushConstantsDescription {
                     stage_flags: ShaderStages::FRAGMENT,
                     offset: 0,
                     size: size_of::<MyPushConstants>() as u32,
@@ -128,9 +128,11 @@ impl Renderer {
             .command_recorder
             .begin_rendering(&RenderingBeginInfo {
                 render_area: RenderArea {
-                    offset: 0,
-                    width: size.width,
-                    height: size.height,
+                    extent: Extent2D {
+                        width: size.width,
+                        height: size.height,
+                    },
+                    offset: Offset2D { x: 0, y: 0 },
                 },
                 rendering_flags: RenderingFlags::None,
                 view_mask: 0,

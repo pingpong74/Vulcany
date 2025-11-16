@@ -264,16 +264,16 @@ impl BitOr for ShaderStages {
     }
 }
 
-#[derive(Clone)]
-pub struct PushConstants {
+#[derive(Clone, Copy)]
+pub struct PushConstantsDescription {
     pub stage_flags: ShaderStages,
     pub offset: u32,
     pub size: u32,
 }
 
-impl Default for PushConstants {
+impl Default for PushConstantsDescription {
     fn default() -> Self {
-        return PushConstants {
+        return PushConstantsDescription {
             stage_flags: ShaderStages::ALL,
             offset: 0,
             size: 0,
@@ -284,7 +284,7 @@ impl Default for PushConstants {
 #[derive(Clone)]
 pub struct RasterizationPipelineDescription {
     pub vertex_input: VertexInputDescription,
-    pub push_constants: PushConstants,
+    pub push_constants: PushConstantsDescription,
     pub vertex_shader_path: &'static str,
     pub fragment_shader_path: &'static str,
     pub cull_mode: CullMode,
@@ -299,7 +299,7 @@ impl Default for RasterizationPipelineDescription {
     fn default() -> Self {
         Self {
             vertex_input: VertexInputDescription::default(),
-            push_constants: PushConstants::default(),
+            push_constants: PushConstantsDescription::default(),
             vertex_shader_path: " ",
             fragment_shader_path: " ",
             cull_mode: CullMode::None,
@@ -313,7 +313,32 @@ impl Default for RasterizationPipelineDescription {
 }
 
 //// Compute Pipeline create info ////
+#[derive(Clone)]
 pub struct ComputePipelineDescription {
     pub shader_path: &'static str,
-    pub push_constants: PushConstants,
+    pub push_constants: PushConstantsDescription,
+}
+
+//// Ray tracing pipeline info ////
+
+#[derive(Clone, Copy, PartialEq)]
+pub enum HitGroupType {
+    Triangle,
+    Procedural,
+}
+
+#[derive(Clone, Copy)]
+pub struct HitGroupDescription {
+    pub any_hit: &'static str,
+    pub closet_hit: &'static str,
+    pub intersection: &'static str,
+    pub hit_grp_type: HitGroupType,
+}
+
+#[derive(Clone)]
+pub struct RayTracingPipelineDescription {
+    pub raygen: &'static str,
+    pub miss: Vec<&'static str>,
+    pub hit_grps: Vec<HitGroupDescription>,
+    pub push_constants: PushConstantsDescription,
 }
